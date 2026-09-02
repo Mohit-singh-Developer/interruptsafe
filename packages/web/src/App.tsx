@@ -1,116 +1,112 @@
-import { useEffect, useState } from "react";
-import type { HealthResponse } from "@interruptsafe/shared";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { sendChatMessage } from "./transport/chatClient";
 
 /**
- * InterruptSafe web client - Phase 1 placeholder.
+ * InterruptSafe web client - Phase 2.
  *
- * This page exists to prove the frontend builds, runs, and can reach the
- * backend through the Vite proxy. There is no conversation UI, no microphone,
- * and no audio playback yet.
+ * A minimal text conversation: type a message, send it over HTTP, display the
+ * reply. The message list here is display state only - the backend is stateless
+ * and no history is sent with a request. There is no microphone, no audio, and
+ * no interruption control yet.
  */
 
-type BackendState =
-  | { kind: "checking" }
-  | { kind: "ok"; health: HealthResponse }
-  | { kind: "error"; message: string };
-
-function useBackendHealth(): BackendState {
-  const [state, setState] = useState<BackendState>({ kind: "checking" });
-
-  useEffect(() => {
-    const controller = new AbortController();
-
-    fetch("/api/health", { signal: controller.signal })
-      .then(async (response) => {
-        if (!response.ok) {
-          throw new Error(`Backend responded ${response.status}`);
-        }
-        const health = (await response.json()) as HealthResponse;
-        setState({ kind: "ok", health });
-      })
-      .catch((error: unknown) => {
-        if (controller.signal.aborted) return;
-        setState({
-          kind: "error",
-          message: error instanceof Error ? error.message : String(error),
-        });
-      });
-
-    return () => controller.abort();
-  }, []);
-
-  return state;
-}
-
-function BackendStatus({ state }: { state: BackendState }) {
-  if (state.kind === "checking") {
-    return (
-      <p className="status status--pending">
-        <span className="dot" /> Checking backend…
-      </p>
-    );
-  }
-
-  if (state.kind === "error") {
-    return (
-      <>
-        <p className="status status--error">
-          <span className="dot" /> Backend unreachable
-        </p>
-        <p className="detail">{state.message}</p>
-        <p className="detail">
-          Start it with <code>npm run dev:server</code>, or run both with{" "}
-          <code>npm run dev</code>.
-        </p>
-      </>
-    );
-  }
-
-  const { health } = state;
-  return (
-    <>
-      <p className="status status--ok">
-        <span className="dot" /> Backend connected
-      </p>
-      <dl className="detail-grid">
-        <dt>Service</dt>
-        <dd>{health.service}</dd>
-        <dt>Phase</dt>
-        <dd>{health.phase}</dd>
-        <dt>Uptime</dt>
-        <dd>{health.uptimeSeconds}s</dd>
-      </dl>
-    </>
-  );
+interface DisplayMessage {
+  id: number;
+  role: "user" | "assistant";
+  text: string;
 }
 
 export function App() {
-  const state = useBackendHealth();
+  const [messages, setMessages] = useState<DisplayMessage[]>([]);
+  const [input, setInput] = useState("");
+  const [isSending, setIsSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const nextId = useRef(0);
+  const endOfListRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    endOfListRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, isSending]);
+
+  const append = (role: DisplayMessage["role"], text: string) => {
+    setMessages((current) => [...current, { id: nextId.current++, role, text }]);
+  };
+
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+
+    const message = input.trim();
+    if (message.length === 0 || isSending) return;
+
+    setInput("");
+    setError(null);
+    append("user", message);
+    setIsSending(true);
+
+    try {
+      const reply = await sendChatMessage(message);
+      append("assistant", reply);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setIsSending(false);
+    }
+  }
 
   return (
     <main className="shell">
       <header>
         <h1>InterruptSafe</h1>
         <p className="tagline">
-          A full-duplex voice agent that never continues an outdated
-          conversation.
+          Phase 2 - text conversation over HTTP, answered by a deterministic
+          mock provider. No language model is called.
         </p>
       </header>
 
-      <section className="card">
-        <h2>Backend</h2>
-        <BackendStatus state={state} />
+      <section className="conversation" aria-label="Conversation">
+        {messages.length === 0 && !isSending ? (
+          <p className="empty">Send a message to start.</p>
+        ) : null}
+
+        {messages.map((message) => (
+          <article key={message.id} className={`message message--${message.role}`}>
+            <span className="message__role">
+              {message.role === "user" ? "You" : "Assistant"}
+            </span>
+            <p className="message__text">{message.text}</p>
+          </article>
+        ))}
+
+        {isSending ? (
+          <p className="pending" role="status">
+            Waiting for a response…
+          </p>
+        ) : null}
+
+        <div ref={endOfListRef} />
       </section>
 
-      <section className="card">
-        <h2>Phase 1 of 16</h2>
-        <p className="detail">
-          Frontend and backend foundation only. Conversation state, generation
-          versioning, tool cancellation, stale-result fencing, interruption
-          handling, speech-to-text and Rime speech output are not implemented
-          yet.
+      {error !== null ? (
+        <p className="error" role="alert">
+          {error}
         </p>
-      </section>
+      ) : null}
+
+      <form className="composer" onSubmit={handleSubmit}>
+        <input
+          type="text"
+          value={input}
+          onChange={(event) => setInput(event.target.value)}
+          placeholder="Type a message"
+          aria-label="Message"
+          autoComplete="off"
+          disabled={isSending}
+        />
+        <button type="submit" disabled={isSending || input.trim().length === 0}>
+          {isSending ? "Sending…" : "Send"}
+        </button>
+      </form>
     </main>
   );
 }

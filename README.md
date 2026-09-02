@@ -6,17 +6,38 @@ and results from the superseded generation can no longer re-enter it.
 
 ## Current development status
 
-**Phase 1 of 16 - runnable frontend and backend foundation.**
+**Phase 2 of 16 - basic text conversation over HTTP.**
 
-The workspace skeleton exists and both halves run. There is no conversation
-logic, no generation versioning, no interruption handling, no speech-to-text and
-no Rime speech output yet - those arrive in later phases.
+You can type a message and get a reply. The reply comes from a **deterministic
+mock provider**, not a language model - no API key is required and no external
+call is made. There is no conversation state on the server, no generation
+versioning, no interruption handling, no speech-to-text and no Rime speech
+output yet; those arrive in later phases.
 
 | Phase | Status |
 |-------|--------|
 | 0 - Project planning and architecture | Complete |
 | 1 - Frontend and backend structure | Complete |
-| 2-16 | Not started |
+| 2 - Basic text conversation flow | Complete |
+| 3-16 | Not started |
+
+## API
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /api/health` | Liveness and current phase |
+| `POST /api/chat` | Single-turn conversation |
+
+```
+POST /api/chat
+{ "message": "Hello" }
+
+200 -> { "message": "..." }
+400 -> { "error": "..." }
+```
+
+The endpoint is stateless: no history is sent and none is stored. The browser
+keeps the message list for display only.
 
 ## Architecture
 

@@ -307,18 +307,83 @@ codes against that, not against assumption. `RIME_API_KEY` is server-side only.
 
 ## 10. LLM provider abstraction
 
-The agent loop must not be coupled to one vendor or one model. The provider
-interface is deliberately narrow - streaming text, tool calls, and cancellation:
+The agent loop must not be coupled to one vendor or one model. The abstraction is
+introduced in its simplest useful form and grows only when a phase genuinely
+requires more, rather than being built speculatively against a future need.
+
+### 10.1 Phase 2 - request and response
+
+The provider starts as a plain asynchronous call. There is no streaming and no
+cancellation, because nothing at this phase consumes either.
+
+```ts
+interface LlmRequest {
+  readonly message: string;
+}
+
+interface LlmResult {
+  readonly message: string;
+}
+
+interface LlmProvider {
+  readonly name: string;
+  generate(request: LlmRequest): Promise<LlmResult>;
+}
+```
+
+The only implementation at this phase is a **deterministic mock**. It makes no
+network call, requires no API key, and returns a pure function of its input so
+that the browser-to-backend path can be exercised and asserted against before a
+real provider exists.
+
+This lives in `packages/server/src/agent/llmProvider.ts`, with the mock in
+`packages/server/src/agent/deterministicProvider.ts`. Construction happens in a
+single `createLlmProvider()` factory, and that factory is the seam: the
+conversation route depends only on the interface and never on a concrete
+provider.
+
+### 10.2 Phase 3 - a real provider behind the same abstraction
+
+Phase 3 adds a real implementation and selects it inside `createLlmProvider()`.
+The conversation route is not rewritten, because it never referred to anything
+but `LlmProvider`.
+
+The default real implementation targets the Anthropic SDK. Model id and reasoning
+effort come from environment variables (`LLM_MODEL`, `LLM_EFFORT`), so changing
+model is configuration, not a code change.
+
+**Streaming is not a requirement of Phase 3.** A real provider can satisfy the
+Phase 2 `generate` contract by awaiting a complete response. Streaming must not
+be introduced at this phase unless Phase 3 turns out to genuinely need it.
+
+### 10.3 Voice, streaming and interruption phases - evolving the interface
+
+The interface grows when something actually consumes token-level output: the
+sentence chunker in section 9 needs partial text so Rime can begin speaking
+before the full reply exists, and interruption needs a way to ask an in-flight
+turn to stop. At that point the provider becomes something closer to:
 
 ```ts
 interface LlmProvider {
+  readonly name: string;
   streamTurn(request: LlmTurnRequest, signal: AbortSignal): AsyncIterable<LlmEvent>;
 }
 ```
 
-The default implementation targets the Anthropic SDK. Model id and reasoning
-effort come from environment variables (`LLM_MODEL`, `LLM_EFFORT`), so changing
-model is configuration, not a code change.
+Two constraints govern that evolution:
+
+- The `AbortSignal` is a **best-effort** cancellation request, exactly as
+  described in sections 7 and 8.1. A provider may ignore it, and work already
+  dispatched may still complete.
+- Correctness must continue to rest on advancing the generation and on fencing
+  stale results at the single choke point - never on a stream having been
+  successfully aborted.
+
+An interface that made cancellation look guaranteed would contradict the central
+claim of this project, so the streaming form must be introduced without weakening
+either constraint.
+
+### 10.4 Notes that apply once a real provider exists
 
 **Agent loop:** a manual `while (stop_reason === "tool_use")` loop rather than the
 SDK's tool-runner helper. The tool runner is the better default for ordinary
