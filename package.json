@@ -1,0 +1,24 @@
+{
+  "name": "interruptsafe",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A full-duplex voice agent that never continues an outdated conversation.",
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,web -c blue,magenta \"npm:dev:server\" \"npm:dev:web\"",
+    "dev:server": "npm run dev --workspace @interruptsafe/server",
+    "dev:web": "npm run dev --workspace @interruptsafe/web",
+    "build": "npm run build --workspace @interruptsafe/web",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.5",
+    "typescript": "^7.0.2"
+  }
+}

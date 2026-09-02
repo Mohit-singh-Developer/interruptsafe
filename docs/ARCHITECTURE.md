@@ -73,7 +73,7 @@ TypeScript end to end, in an npm workspaces monorepo.
 
 | Layer | Choice |
 |-------|--------|
-| Backend | Node.js 22 + TypeScript, `ws` for WebSocket, `fastify` for HTTP |
+| Backend | Node.js 22 + TypeScript, `fastify` for HTTP; `ws` added at Phase 8 for real-time transport |
 | Frontend | React + Vite + TypeScript, Web Audio API |
 | Shared | `packages/shared` - wire protocol and generation types, zero dependencies |
 | LLM | Anthropic SDK behind an `LlmProvider` interface (section 10) |
@@ -112,12 +112,12 @@ interruptsafe/
         tools/                 # registry, dispatch (the fencing choke point)
         tts/                   # Rime client
         stt/                   # SttProvider interface + implementations
-        transport/             # WebSocket server, wire codec
+        transport/             # HTTP routes; WebSocket server and wire codec from Phase 8
         obs/                   # event log, metrics
     web/
       src/
         audio/                 # capture, VAD, playback
-        transport/             # WebSocket client
+        transport/             # HTTP client; WebSocket client from Phase 8
         state/                 # local mirror of server generation
         ui/                    # transcript, generation timeline, event log
 ```
@@ -221,8 +221,8 @@ twitchy.
 | Tier | Source | Latency | Action | Phase |
 |------|--------|---------|--------|-------|
 | 1 - Suspected | Client-side VAD | ~50-150 ms | Flush local playback immediately. **Do not** bump the generation | 8 |
-| 2 - Confirmed | STT speech-start / first non-empty interim transcript | ~200-500 ms | Bump the generation, cancel everything | 8 |
-| 3 - Explicit | UI interrupt control / new typed turn | deterministic | Bump the generation, cancel everything | 7 |
+| 2 - Confirmed | STT speech-start / first non-empty interim transcript | ~200-500 ms | Bump the generation; request cancellation of in-flight work (best-effort) | 8 |
+| 3 - Explicit | UI interrupt control / new typed turn | deterministic | Bump the generation; request cancellation of in-flight work (best-effort) | 7 |
 
 **Two-stage commit.** Tier 1 provides the *feel* of instant interruption - audio
 stops the moment the user speaks. Tier 2 provides the *truth*. If tier 2 does not
@@ -237,6 +237,41 @@ audio is playing; ignore VAD for a short window after playback begins.
 
 **Tier 3 ships first, in Phase 7, and needs no microphone.** It is also the tier
 the automated tests drive, because it is deterministic.
+
+### 8.1 Interruption over HTTP (Phases 1 to 7)
+
+Before any WebSocket exists, an interruption is simply a separate HTTP request to
+a dedicated interruption endpoint. What that endpoint does - and what it
+explicitly does not do - is the point of the whole design:
+
+1. **The interruption endpoint advances the active conversation generation.**
+   This is the only guaranteed effect. It is a local, synchronous state change on
+   the server and it cannot fail partway.
+
+2. **The client may abort or stop waiting for an obsolete request.** Aborting the
+   in-flight `fetch` frees the client to move on and prevents a superseded
+   response from being rendered. It is a client-side convenience only.
+
+3. **Aborting a client request does not cancel server-side work.** Closing the
+   connection may cause the server to observe a disconnect, but observing a
+   disconnect is not cancellation, and the system must never depend on it. Work
+   already dispatched - an LLM turn, a tool call, an external API request -
+   continues unless something server-side explicitly cancels it, and some of it
+   cannot be cancelled at all.
+
+4. **Server-side work may therefore continue and complete after the
+   interruption.** That is expected and permitted. Cancellation is best-effort;
+   it reduces cost and latency but is never relied upon for correctness.
+
+5. **Anything that completes under an older generation is fenced and rejected.**
+   The result is compared against the current generation at the single choke
+   point in section 7, and is discarded if it is stale. This is what actually
+   protects the conversation, and it holds whether or not the client aborted
+   anything and whether or not cancellation succeeded.
+
+The same five properties hold once the transport becomes a WebSocket in Phase 8.
+Only the delivery mechanism changes; generation advancement remains the
+guaranteed effect, and fencing remains the guarantee that makes it correct.
 
 ## 9. Rime TTS integration
 
@@ -301,10 +336,32 @@ visible response text instead of emitting a proper tool-use block. In a voice
 agent that means Rime reads a raw tool call aloud to the user. Low effort with
 adaptive thinking left on is both cheaper and safer.
 
-## 11. Wire protocol
+## 11. Transport and wire protocol
 
-One WebSocket per session. WebRTC is not used - its signalling setup costs
-significant time and buys nothing for a local demo.
+The transport is introduced in two stages. Real-time transport is deliberately
+deferred until the data being carried is actually continuous.
+
+### 11.1 Phases 1 to 7 - plain HTTP
+
+The text-only phases need nothing more than request and response. The browser
+talks to the Vite dev server, which proxies `/api/*` to the backend, so there is
+no cross-origin request and no CORS configuration.
+
+Adding a socket earlier would introduce reconnection, backpressure, and framing
+concerns while the payload is still a single request and a single reply. The
+entire correctness core - conversation state, generation versioning, tool
+cancellation, and stale-result fencing - is built and proven over HTTP.
+
+Interruption works over plain HTTP as a request to a separate endpoint. Section
+8.1 sets out exactly what that guarantees and, importantly, what it does not:
+aborting a client request never cancels server-side work.
+
+### 11.2 Phase 8 onward - one WebSocket per session
+
+Real-time transport arrives at the point where it is genuinely required:
+microphone audio streaming to the server for speech-to-text, and synthesized
+audio streaming back for playback. WebRTC is not used - its signalling setup
+costs significant time and buys nothing for a local demo.
 
 - **JSON text frames** carry control and observability events:
   `user_turn`, `generation_changed`, `tool_started`, `tool_result_accepted`,
@@ -327,13 +384,15 @@ time - this is defence in depth for guarantee 2.
 
 ### CORE MVP - required
 
-- Text-based conversation with streaming assistant output.
+- Text-based conversation over HTTP, with an agent abstraction behind it.
 - `ConversationState` as the single owner of conversation history.
 - `GenerationManager`: monotonic generation, per-generation `AbortController`.
 - Simulated long-running tools with configurable delay, clearly labelled as mock.
 - **Stale-result fencing at a single choke point**, with a visible event log.
-- Deterministic interruption (tier 3): abort the LLM stream, abort tools, bump
-  the generation, truncate the interrupted turn.
+- Deterministic interruption (tier 3): bump the generation and truncate the
+  interrupted turn, then request best-effort cancellation of the LLM stream and
+  any in-flight tools. Correctness rests on the generation bump and the fencing,
+  never on cancellation succeeding.
 - Microphone capture, VAD, and STT (Phase 8).
 - Rime TTS as the only speech output, with per-request logging.
 - Audio playback that stops promptly on interruption, and client-side dropping of
@@ -365,14 +424,14 @@ Each phase ends with a report and a stop, for manual review and commit.
 | Phase | Deliverable | Runnable | Keys needed |
 |-------|-------------|----------|-------------|
 | 0 | Architecture plan, README, `.gitignore`, `.env.example` | - | none |
-| 1 | Workspace skeleton, WebSocket handshake | yes | none |
-| 2 | Text conversation, streaming deltas to the UI | yes | Anthropic |
+| 1 | Workspace skeleton, HTTP server, health endpoint | yes | none |
+| 2 | Text conversation over HTTP: text input, agent abstraction, response display | yes | none |
 | 3 | `ConversationState` extracted and owned | yes | Anthropic |
 | 4 | `GenerationManager` plus generation timeline UI | yes | Anthropic |
 | 5 | Mock long-running tools (labelled MOCK) | yes | Anthropic |
 | 6 | **Stale-result fencing and the event log** | yes | Anthropic |
 | 7 | Deterministic interruption; LLM and tool abort; turn truncation | yes | Anthropic |
-| 8 | Microphone, VAD, STT, two-stage commit | yes | + Deepgram |
+| 8 | **Real-time transport introduced**; microphone, VAD, STT, two-stage commit | yes | + Deepgram |
 | 9 | **Rime integration and request logging** | yes | + Rime |
 | 10 | Playback flush on interrupt; client-side generation drop | yes | all |
 | 11 | End-to-end travel assistant scenario | yes | all |
@@ -382,10 +441,15 @@ Each phase ends with a report and a stop, for manual review and commit.
 | 15 | `RIME_EVIDENCE.md` from captured logs | - | - |
 | 16 | README and hackathon documentation | - | - |
 
-**Phases 2 through 7 require no microphone and no Rime key.** The entire
-correctness core - versioning, cancellation, and fencing - is provable by typing
-text. This is deliberate: the hardest logic is de-risked before any audio
-complexity is introduced.
+**Phases 2 through 7 require no microphone, no Rime key, and no WebSocket.** The
+entire correctness core - versioning, cancellation, and fencing - is provable by
+typing text over plain HTTP. This is deliberate: the hardest logic is de-risked
+before either audio complexity or real-time transport is introduced.
+
+Phase 2 puts a deterministic stub behind the `LlmProvider` interface so the
+request-to-response path can be proven without a network call; the real provider
+implementation is wired in from Phase 3, which is where the Anthropic key first
+becomes necessary.
 
 ## 14. Environment variables
 
@@ -395,9 +459,9 @@ template with per-phase annotations.
 
 | Variable | Purpose | First needed |
 |----------|---------|--------------|
-| `ANTHROPIC_API_KEY` | LLM provider credential | Phase 2 |
-| `LLM_MODEL` | Model id, swappable without code change | Phase 2 |
-| `LLM_EFFORT` | Reasoning effort, `low` recommended for voice | Phase 2 |
+| `ANTHROPIC_API_KEY` | LLM provider credential | Phase 3 |
+| `LLM_MODEL` | Model id, swappable without code change | Phase 3 |
+| `LLM_EFFORT` | Reasoning effort, `low` recommended for voice | Phase 3 |
 | `RIME_API_KEY` | Rime credential | Phase 9 |
 | `RIME_SPEAKER` | Rime voice selection | Phase 9 |
 | `RIME_MODEL` | Rime model id | Phase 9 |
