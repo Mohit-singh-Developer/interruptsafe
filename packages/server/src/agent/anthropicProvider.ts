@@ -6,8 +6,10 @@ import type { LlmProvider, LlmRequest, LlmResult } from "./llmProvider";
  * REAL PROVIDER - Phase 3.
  *
  * Returns one complete response per call. No streaming, no cancellation, no
- * tools; those belong to later phases and would change the `LlmProvider`
- * interface, which this phase deliberately leaves alone.
+ * tools; those belong to later phases.
+ *
+ * The Messages API is stateless, so the whole conversation supplied by
+ * `ConversationState` is sent on every turn.
  *
  * Verified against @anthropic-ai/sdk 0.123.0:
  *   - `client.messages.create({ model, max_tokens, system, thinking,
@@ -42,13 +44,19 @@ export function createAnthropicProvider(config: AnthropicConfig): LlmProvider {
     name: `anthropic:${config.model}`,
 
     async generate(request: LlmRequest): Promise<LlmResult> {
+      // The API is stateless, so the full conversation is sent every turn.
+      const messages: Anthropic.MessageParam[] = request.messages.map((turn) => ({
+        role: turn.role,
+        content: turn.content,
+      }));
+
       const response = await client.messages.create({
         model: config.model,
         max_tokens: MAX_TOKENS,
         system: SYSTEM_PROMPT,
         thinking: { type: "adaptive" },
         output_config: { effort: config.effort },
-        messages: [{ role: "user", content: request.message }],
+        messages,
       });
 
       // A refusal arrives as a successful HTTP response, so it must be checked

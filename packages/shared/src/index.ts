@@ -5,8 +5,8 @@
  * package.json) so there is no build step. Both `tsx` on the server and Vite in
  * the browser resolve `.ts` directly.
  *
- * Phase 2 contains the health contract and a single-turn chat contract. The
- * generation and interruption protocol types arrive in later phases.
+ * Contains the health contract and a multi-turn chat contract. The generation
+ * and interruption protocol types arrive in later phases.
  */
 
 /** Response body of `GET /api/health`. */
@@ -24,17 +24,24 @@ export interface HealthResponse {
 /**
  * Request body of `POST /api/chat`.
  *
- * Deliberately a single field. Conversation identity, generation stamps and
- * interruption flags belong to later phases and must not be added here until
- * the phase that needs them.
+ * Generation stamps and interruption flags belong to later phases and must not
+ * be added here until the phase that needs them.
  */
 export interface ChatRequest {
   message: string;
+  /**
+   * Conversation to continue. Omit on the first turn; the server allocates an
+   * id and returns it. An unrecognised id starts a fresh conversation under
+   * that id rather than failing, so a client survives a server restart.
+   */
+  conversationId?: string;
 }
 
 /** Success response body of `POST /api/chat`. */
 export interface ChatResponse {
   message: string;
+  /** Echoed back so the client can continue the same conversation. */
+  conversationId: string;
 }
 
 /** Error response body used by any endpoint that rejects a request. */

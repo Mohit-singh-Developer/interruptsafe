@@ -7,11 +7,22 @@ import type {
 /**
  * HTTP client for the conversation endpoint.
  *
- * Phase 2 sends one message and awaits one reply. Streaming, cancellation and
- * generation stamps belong to later phases.
+ * Sends one message and awaits one reply. The server owns the transcript, so
+ * the only thing carried between turns is the conversation id. Streaming,
+ * cancellation and generation stamps belong to later phases.
  */
-export async function sendChatMessage(message: string): Promise<string> {
-  const body: ChatRequest = { message };
+
+export interface ChatReply {
+  readonly message: string;
+  readonly conversationId: string;
+}
+
+export async function sendChatMessage(
+  message: string,
+  conversationId?: string,
+): Promise<ChatReply> {
+  const body: ChatRequest =
+    conversationId === undefined ? { message } : { message, conversationId };
 
   const response = await fetch("/api/chat", {
     method: "POST",
@@ -28,9 +39,13 @@ export async function sendChatMessage(message: string): Promise<string> {
   }
 
   const chat = payload as ChatResponse | null;
-  if (chat === null || typeof chat.message !== "string") {
+  if (
+    chat === null ||
+    typeof chat.message !== "string" ||
+    typeof chat.conversationId !== "string"
+  ) {
     throw new Error("Malformed response from server.");
   }
 
-  return chat.message;
+  return { message: chat.message, conversationId: chat.conversationId };
 }

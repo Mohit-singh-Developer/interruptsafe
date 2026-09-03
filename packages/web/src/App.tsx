@@ -5,9 +5,10 @@ import { sendChatMessage } from "./transport/chatClient";
  * InterruptSafe web client - Phase 2.
  *
  * A minimal text conversation: type a message, send it over HTTP, display the
- * reply. The message list here is display state only - the backend is stateless
- * and no history is sent with a request. There is no microphone, no audio, and
- * no interruption control yet.
+ * reply. The message list here is display state only - the server owns the
+ * authoritative transcript, and the only thing carried between turns is the
+ * conversation id. There is no microphone, no audio, and no interruption
+ * control yet.
  */
 
 interface DisplayMessage {
@@ -24,6 +25,9 @@ export function App() {
 
   const nextId = useRef(0);
   const endOfListRef = useRef<HTMLDivElement>(null);
+  // Allocated by the server on the first turn, then sent back on every turn.
+  // Reloading the page starts a new conversation.
+  const conversationId = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     endOfListRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -45,8 +49,9 @@ export function App() {
     setIsSending(true);
 
     try {
-      const reply = await sendChatMessage(message);
-      append("assistant", reply);
+      const reply = await sendChatMessage(message, conversationId.current);
+      conversationId.current = reply.conversationId;
+      append("assistant", reply.message);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -59,8 +64,8 @@ export function App() {
       <header>
         <h1>InterruptSafe</h1>
         <p className="tagline">
-          Phase 2 - text conversation over HTTP, answered by a deterministic
-          mock provider. No language model is called.
+          Text conversation over HTTP. The server owns the transcript; the
+          active provider is chosen by server configuration.
         </p>
       </header>
 

@@ -2,16 +2,18 @@ import Fastify, { type FastifyError } from "fastify";
 import type { ApiErrorResponse } from "@interruptsafe/shared";
 import { ConfigError, loadConfig, loadEnvFile, type Config } from "./config";
 import { createLlmProvider, type LlmProvider } from "./agent/llmProvider";
+import { ConversationStore } from "./session/conversationState";
 import { registerRoutes } from "./transport/routes";
 
 /**
  * InterruptSafe backend - Phase 3.
  *
- * Serves a health endpoint and a single-turn chat endpoint. The reply comes
- * from whichever provider `LLM_PROVIDER` selects: a deterministic mock, or a
- * real Anthropic provider. There is still no streaming, no conversation state,
- * no generation versioning, no cancellation, no tools and no WebSocket
- * transport. Those arrive in later phases.
+ * Serves a health endpoint and a multi-turn chat endpoint. The reply comes from
+ * whichever provider `LLM_PROVIDER` selects: a deterministic mock, or a real
+ * Anthropic provider. Conversation history is owned by `ConversationState`.
+ *
+ * There is still no streaming, no generation versioning, no cancellation, no
+ * tools and no WebSocket transport. Those arrive in later phases.
  */
 
 // Configuration and provider construction happen before the server starts, so a
@@ -45,7 +47,10 @@ app.log.info(
   "LLM provider selected",
 );
 
-registerRoutes(app, provider);
+// Single owner of conversation history for the lifetime of this process.
+const conversations = new ConversationStore();
+
+registerRoutes(app, provider, conversations);
 
 // Normalise framework-generated failures (malformed JSON, unknown routes) onto
 // the same `{ error }` shape the routes use, so clients parse one error format.
