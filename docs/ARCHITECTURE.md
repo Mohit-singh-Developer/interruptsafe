@@ -352,6 +352,13 @@ The default real implementation targets the Anthropic SDK. Model id and reasonin
 effort come from environment variables (`LLM_MODEL`, `LLM_EFFORT`), so changing
 model is configuration, not a code change.
 
+Which provider is active is chosen by `LLM_PROVIDER`, and the deterministic mock
+is retained rather than replaced - it is what allows the later interruption and
+stale-result tests to run without a network dependency. Selecting a real
+provider without its required configuration is a startup failure; the server
+never falls back to the mock on its own, because silently serving fake replies
+would undermine every test built on top of it.
+
 **Streaming is not a requirement of Phase 3.** A real provider can satisfy the
 Phase 2 `generate` contract by awaiting a complete response. Streaming must not
 be introduced at this phase unless Phase 3 turns out to genuinely need it.
@@ -524,7 +531,8 @@ template with per-phase annotations.
 
 | Variable | Purpose | First needed |
 |----------|---------|--------------|
-| `ANTHROPIC_API_KEY` | LLM provider credential | Phase 3 |
+| `LLM_PROVIDER` | Selects `deterministic` or `anthropic`; defaults to `deterministic` | Phase 3 |
+| `ANTHROPIC_API_KEY` | LLM provider credential, required only when `LLM_PROVIDER=anthropic` | Phase 3 |
 | `LLM_MODEL` | Model id, swappable without code change | Phase 3 |
 | `LLM_EFFORT` | Reasoning effort, `low` recommended for voice | Phase 3 |
 | `RIME_API_KEY` | Rime credential | Phase 9 |

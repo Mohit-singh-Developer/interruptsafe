@@ -1,26 +1,49 @@
 import Fastify, { type FastifyError } from "fastify";
 import type { ApiErrorResponse } from "@interruptsafe/shared";
-import { createLlmProvider } from "./agent/llmProvider";
+import { ConfigError, loadConfig, loadEnvFile, type Config } from "./config";
+import { createLlmProvider, type LlmProvider } from "./agent/llmProvider";
 import { registerRoutes } from "./transport/routes";
 
 /**
- * InterruptSafe backend - Phase 2.
+ * InterruptSafe backend - Phase 3.
  *
- * Serves a health endpoint and a single-turn chat endpoint backed by a
- * deterministic mock provider. There is no real language model, no streaming,
- * no conversation state, no generation versioning, no cancellation, no tools
- * and no WebSocket transport. Those arrive in later phases.
+ * Serves a health endpoint and a single-turn chat endpoint. The reply comes
+ * from whichever provider `LLM_PROVIDER` selects: a deterministic mock, or a
+ * real Anthropic provider. There is still no streaming, no conversation state,
+ * no generation versioning, no cancellation, no tools and no WebSocket
+ * transport. Those arrive in later phases.
  */
 
-const PORT = Number(process.env.PORT ?? 8787);
-const HOST = process.env.HOST ?? "127.0.0.1";
+// Configuration and provider construction happen before the server starts, so a
+// misconfiguration is reported plainly instead of surfacing as a request error.
+let config: Config;
+let provider: LlmProvider;
+
+try {
+  loadEnvFile();
+  config = loadConfig();
+  provider = createLlmProvider(config);
+} catch (error) {
+  if (error instanceof ConfigError) {
+    console.error(`\nConfiguration error: ${error.message}\n`);
+    process.exit(1);
+  }
+  throw error;
+}
 
 const app = Fastify({
-  logger: { level: process.env.LOG_LEVEL ?? "info" },
+  logger: { level: config.logLevel },
 });
 
-const provider = createLlmProvider();
-app.log.info({ provider: provider.name }, "LLM provider selected");
+// Model and effort are safe to log; the API key is never logged.
+app.log.info(
+  {
+    provider: provider.name,
+    selection: config.provider,
+    ...(config.anthropic ? { effort: config.anthropic.effort } : {}),
+  },
+  "LLM provider selected",
+);
 
 registerRoutes(app, provider);
 
@@ -55,7 +78,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
 }
 
 try {
-  await app.listen({ port: PORT, host: HOST });
+  await app.listen({ port: config.port, host: config.host });
 } catch (error) {
   app.log.error(error);
   process.exit(1);

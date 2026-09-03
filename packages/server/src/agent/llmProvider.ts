@@ -1,15 +1,18 @@
+import type { Config } from "../config";
+import { ConfigError } from "../config";
+import { createAnthropicProvider } from "./anthropicProvider";
 import { createDeterministicProvider } from "./deterministicProvider";
 
 /**
  * The seam between the conversation route and whatever actually produces a
- * reply. The route depends only on the `LlmProvider` interface, so a real
- * provider can be added without the route changing.
+ * reply. The route depends only on the `LlmProvider` interface, so providers
+ * can be swapped without the route changing.
  *
- * Scope note: this interface is intentionally non-streaming for Phase 2, which
- * forbids both streaming and cancellation. Section 10 of docs/ARCHITECTURE.md
- * describes the eventual streaming form (`streamTurn(request, signal)`); that
- * shape is introduced in the phase that actually needs token streaming, rather
- * than being built speculatively now.
+ * Scope note: this interface is intentionally non-streaming, matching section
+ * 10.1 of docs/ARCHITECTURE.md. Section 10.3 describes the eventual streaming
+ * form (`streamTurn(request, signal)`), introduced only in the phase that
+ * actually needs token streaming. Phase 3 adds a real provider behind this
+ * unchanged shape.
  */
 
 export interface LlmRequest {
@@ -29,11 +32,22 @@ export interface LlmProvider {
 }
 
 /**
- * Single construction point for the active provider.
- *
- * Phase 3 adds a real implementation and selects it here - for example from an
- * environment variable. Nothing outside this function needs to change.
+ * Single construction point for the active provider, selected by
+ * `LLM_PROVIDER`. There is deliberately no fallback from a requested real
+ * provider to the mock: a misconfigured "anthropic" selection fails at startup
+ * rather than quietly serving fake replies.
  */
-export function createLlmProvider(): LlmProvider {
-  return createDeterministicProvider();
+export function createLlmProvider(config: Config): LlmProvider {
+  switch (config.provider) {
+    case "anthropic": {
+      if (config.anthropic === undefined) {
+        throw new ConfigError(
+          'LLM_PROVIDER is "anthropic" but its configuration is missing.',
+        );
+      }
+      return createAnthropicProvider(config.anthropic);
+    }
+    case "deterministic":
+      return createDeterministicProvider();
+  }
 }

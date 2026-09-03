@@ -10,9 +10,12 @@ import type { LlmProvider } from "../agent/llmProvider";
 /**
  * HTTP routes.
  *
- * Phase 2 is stateless: each request is independent and the server keeps no
- * conversation history. The client holds the message list purely for display.
- * Server-side conversation state arrives in a later phase.
+ * Still stateless in Phase 3: each request is independent and the server keeps
+ * no conversation history. The client holds the message list purely for
+ * display. Server-side conversation state arrives in a later phase.
+ *
+ * These routes are provider-agnostic. They depend only on the `LlmProvider`
+ * interface and contain no provider-specific logic.
  */
 
 type Validated =
@@ -55,7 +58,7 @@ export function registerRoutes(app: FastifyInstance, provider: LlmProvider): voi
     return {
       status: "ok",
       service: "interruptsafe-server",
-      phase: 2,
+      phase: 3,
       uptimeSeconds: Number(process.uptime().toFixed(3)),
       timestamp: new Date().toISOString(),
     };
@@ -71,8 +74,16 @@ export function registerRoutes(app: FastifyInstance, provider: LlmProvider): voi
         return { error: validated.error };
       }
 
-      const result = await provider.generate({ message: validated.message });
-      return { message: result.message };
+      try {
+        const result = await provider.generate({ message: validated.message });
+        return { message: result.message };
+      } catch (error) {
+        // Upstream failure (network, auth, rate limit). Details go to the log;
+        // the client gets a generic message so nothing sensitive is echoed back.
+        request.log.error({ err: error }, "Provider failed to generate a reply");
+        reply.code(502);
+        return { error: "The language model provider failed to respond." };
+      }
     },
   );
 }

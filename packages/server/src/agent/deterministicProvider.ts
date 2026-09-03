@@ -1,7 +1,8 @@
 import type { LlmProvider, LlmRequest, LlmResult } from "./llmProvider";
 
 /**
- * MOCK PROVIDER - Phase 2 only.
+ * MOCK PROVIDER - retained as a selectable provider for local development and
+ * testing.
  *
  * This is not a language model and makes no network call. It exists so the
  * full path from the browser to the backend and back can be exercised and

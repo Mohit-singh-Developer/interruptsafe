@@ -6,20 +6,22 @@ and results from the superseded generation can no longer re-enter it.
 
 ## Current development status
 
-**Phase 2 of 16 - basic text conversation over HTTP.**
+**Phase 3 of 16 - real LLM provider behind the existing abstraction.**
 
-You can type a message and get a reply. The reply comes from a **deterministic
-mock provider**, not a language model - no API key is required and no external
-call is made. There is no conversation state on the server, no generation
-versioning, no interruption handling, no speech-to-text and no Rime speech
-output yet; those arrive in later phases.
+You can type a message and get a reply. The reply comes either from a
+**deterministic mock** (the default, requiring no API key and making no network
+call) or from a **real Anthropic model**, selected by `LLM_PROVIDER`. There is
+no streaming, no conversation state on the server, no generation versioning, no
+interruption handling, no speech-to-text and no Rime speech output yet; those
+arrive in later phases.
 
 | Phase | Status |
 |-------|--------|
 | 0 - Project planning and architecture | Complete |
 | 1 - Frontend and backend structure | Complete |
 | 2 - Basic text conversation flow | Complete |
-| 3-16 | Not started |
+| 3 - Real LLM provider | Complete |
+| 4-16 | Not started |
 
 ## API
 
@@ -37,7 +39,67 @@ POST /api/chat
 ```
 
 The endpoint is stateless: no history is sent and none is stored. The browser
-keeps the message list for display only.
+keeps the message list for display only. The route is provider-agnostic - it
+depends only on the `LlmProvider` interface and contains no provider-specific
+logic, and the frontend contains no provider logic and no keys.
+
+`502` is returned if the selected provider fails upstream (network, auth, rate
+limit). Details go to the server log; the client receives a generic message.
+
+## Choosing a provider
+
+Selection is by the `LLM_PROVIDER` environment variable.
+
+### Deterministic mock (default - no API key)
+
+Nothing to configure. With no `.env` file at all:
+
+```
+npm run dev
+```
+
+Replies are a pure function of the input, so they are predictable and testable.
+
+### Real Anthropic provider
+
+```
+cp .env.example .env
+```
+
+Then edit `.env` and set:
+
+```
+LLM_PROVIDER=anthropic
+ANTHROPIC_API_KEY=your-key-here
+```
+
+`.env` is gitignored - never commit it, and never paste a real key into
+documentation, an issue, or a commit message.
+
+If `LLM_PROVIDER=anthropic` and `ANTHROPIC_API_KEY` is missing, the server
+**exits with a clear configuration error**. It never falls back to the mock on
+its own, so you cannot mistake fake replies for real ones.
+
+### Environment variables
+
+| Variable | Required | Default | Purpose |
+|----------|----------|---------|---------|
+| `LLM_PROVIDER` | no | `deterministic` | `deterministic` or `anthropic` |
+| `ANTHROPIC_API_KEY` | only when `LLM_PROVIDER=anthropic` | - | API credential |
+| `LLM_MODEL` | no | `claude-opus-5` | Model id |
+| `LLM_EFFORT` | no | `low` | `low`\|`medium`\|`high`\|`xhigh`\|`max` |
+| `PORT` | no | `8787` | Backend port |
+| `LOG_LEVEL` | no | `info` | Log verbosity |
+
+Real environment variables take precedence over values in `.env`, so you can
+override a single setting for one run without editing the file:
+
+```
+LLM_PROVIDER=deterministic npm run dev
+```
+
+All values are read by the backend only. No key is ever sent to the browser,
+and the API key is never written to the logs.
 
 ## Architecture
 
