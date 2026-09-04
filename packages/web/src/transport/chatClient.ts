@@ -8,13 +8,16 @@ import type {
  * HTTP client for the conversation endpoint.
  *
  * Sends one message and awaits one reply. The server owns the transcript, so
- * the only thing carried between turns is the conversation id. Streaming,
- * cancellation and generation stamps belong to later phases.
+ * the only thing carried between turns is the conversation id. The reply also
+ * reports the generation the turn was processed under, for display. Streaming
+ * and cancellation belong to later phases.
  */
 
 export interface ChatReply {
   readonly message: string;
   readonly conversationId: string;
+  /** Conversation generation this turn was processed under. */
+  readonly generation: number;
 }
 
 export async function sendChatMessage(
@@ -42,10 +45,15 @@ export async function sendChatMessage(
   if (
     chat === null ||
     typeof chat.message !== "string" ||
-    typeof chat.conversationId !== "string"
+    typeof chat.conversationId !== "string" ||
+    typeof chat.generation !== "number"
   ) {
     throw new Error("Malformed response from server.");
   }
 
-  return { message: chat.message, conversationId: chat.conversationId };
+  return {
+    message: chat.message,
+    conversationId: chat.conversationId,
+    generation: chat.generation,
+  };
 }

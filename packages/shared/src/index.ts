@@ -42,6 +42,14 @@ export interface ChatResponse {
   message: string;
   /** Echoed back so the client can continue the same conversation. */
   conversationId: string;
+  /**
+   * The conversation generation this turn was processed under.
+   *
+   * Advancing the generation is what invalidates older work, so surfacing the
+   * stamp lets the client show which version of the conversation a reply
+   * belongs to.
+   */
+  generation: number;
 }
 
 /** Error response body used by any endpoint that rejects a request. */

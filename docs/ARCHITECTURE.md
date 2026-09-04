@@ -138,6 +138,17 @@ class GenerationManager {
 }
 ```
 
+**Scope note.** The implemented manager provides `now`, `bump`, `isCurrent` and
+`isStale`, and it owns no `AbortController`. `signalFor` is deliberately absent
+until there is in-flight work worth cancelling; adding it earlier would be a
+speculative API, and the staleness check must stay useful on its own in any
+case. Each conversation owns its own manager, held by `ConversationState`, so
+generations are isolated and are evicted along with the conversation.
+
+Enforcement is also staged. The chat route currently takes a stamp when a turn
+begins, but does not yet reject a stale result on the way back in; that check,
+and the event log that makes rejections visible, arrive with the fencing phase.
+
 Every unit of work is **stamped at the moment it is created**: the LLM turn, each
 individual tool call, each Rime synthesis request, and each outbound audio frame.
 Nothing is allowed to enter the conversation without its stamp being compared

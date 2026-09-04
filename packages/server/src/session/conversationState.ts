@@ -14,9 +14,13 @@
  * Storage is in memory and per process: history is lost on restart and is not
  * shared across instances. Persistence is deliberately out of scope.
  *
- * This layer holds no generation stamps yet. Generation versioning arrives in
- * the next phase and will attach to the same entry point.
+ * Each conversation also owns a `GenerationManager`. Keeping it here rather
+ * than in a separate registry means generation state is isolated per
+ * conversation by construction, and is evicted along with the conversation it
+ * belongs to instead of leaking after the transcript is gone.
  */
+
+import { GenerationManager } from "./generationManager";
 
 export type ConversationRole = "user" | "assistant";
 
@@ -46,6 +50,7 @@ export function isValidConversationId(value: string): boolean {
 
 interface StoredConversation {
   messages: ConversationMessage[];
+  readonly generation: GenerationManager;
 }
 
 export class ConversationStore {
@@ -77,6 +82,16 @@ export class ConversationStore {
   /** Authoritative history, oldest first. */
   history(id: string): readonly ConversationMessage[] {
     return this.conversations.get(id)?.messages ?? [];
+  }
+
+  /**
+   * The generation owner for this conversation, created with it if needed.
+   *
+   * Each conversation gets its own instance, so advancing one conversation's
+   * generation cannot invalidate work belonging to another.
+   */
+  generationFor(id: string): GenerationManager {
+    return this.touch(id).generation;
   }
 
   /**
@@ -113,7 +128,10 @@ export class ConversationStore {
       return existing;
     }
 
-    const created: StoredConversation = { messages: [] };
+    const created: StoredConversation = {
+      messages: [],
+      generation: new GenerationManager(),
+    };
     this.conversations.set(id, created);
     this.evictOverflow();
     return created;

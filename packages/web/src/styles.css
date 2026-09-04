@@ -94,13 +94,44 @@ h1 {
 }
 
 .message__role {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
   font-size: 0.7rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--muted);
   font-weight: 600;
   margin-bottom: 0.2rem;
+}
+
+/* ---- Generation ---- */
+
+.header-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.generation {
+  font-family: ui-monospace, "Cascadia Code", "Consolas", monospace;
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.05rem 0.5rem;
+  white-space: nowrap;
+}
+
+.generation--current {
+  color: var(--accent);
+  border-color: var(--accent);
+  font-size: 0.75rem;
+  padding: 0.15rem 0.65rem;
 }
 
 .message__text {

@@ -2,19 +2,24 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { sendChatMessage } from "./transport/chatClient";
 
 /**
- * InterruptSafe web client - Phase 2.
+ * InterruptSafe web client.
  *
  * A minimal text conversation: type a message, send it over HTTP, display the
  * reply. The message list here is display state only - the server owns the
  * authoritative transcript, and the only thing carried between turns is the
- * conversation id. There is no microphone, no audio, and no interruption
- * control yet.
+ * conversation id.
+ *
+ * Each reply reports the generation its turn was processed under, which is
+ * shown so the conversation's version is visible as it advances. There is no
+ * microphone, no audio, and no interruption control yet.
  */
 
 interface DisplayMessage {
   id: number;
   role: "user" | "assistant";
   text: string;
+  /** Set on replies; the generation the turn was processed under. */
+  generation?: number;
 }
 
 export function App() {
@@ -22,6 +27,8 @@ export function App() {
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Latest generation reported by the server; null until the first reply.
+  const [generation, setGeneration] = useState<number | null>(null);
 
   const nextId = useRef(0);
   const endOfListRef = useRef<HTMLDivElement>(null);
@@ -33,8 +40,15 @@ export function App() {
     endOfListRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isSending]);
 
-  const append = (role: DisplayMessage["role"], text: string) => {
-    setMessages((current) => [...current, { id: nextId.current++, role, text }]);
+  const append = (
+    role: DisplayMessage["role"],
+    text: string,
+    turnGeneration?: number,
+  ) => {
+    setMessages((current) => [
+      ...current,
+      { id: nextId.current++, role, text, generation: turnGeneration },
+    ]);
   };
 
   async function handleSubmit(event: FormEvent) {
@@ -51,7 +65,8 @@ export function App() {
     try {
       const reply = await sendChatMessage(message, conversationId.current);
       conversationId.current = reply.conversationId;
-      append("assistant", reply.message);
+      setGeneration(reply.generation);
+      append("assistant", reply.message, reply.generation);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -62,7 +77,15 @@ export function App() {
   return (
     <main className="shell">
       <header>
-        <h1>InterruptSafe</h1>
+        <div className="header-row">
+          <h1>InterruptSafe</h1>
+          <span
+            className="generation generation--current"
+            title="Current conversation generation. Advances on every new user turn."
+          >
+            {generation === null ? "no generation yet" : `generation ${generation}`}
+          </span>
+        </div>
         <p className="tagline">
           Text conversation over HTTP. The server owns the transcript; the
           active provider is chosen by server configuration.
@@ -78,6 +101,14 @@ export function App() {
           <article key={message.id} className={`message message--${message.role}`}>
             <span className="message__role">
               {message.role === "user" ? "You" : "Assistant"}
+              {message.generation !== undefined ? (
+                <span
+                  className="generation"
+                  title="Generation this turn was processed under"
+                >
+                  gen {message.generation}
+                </span>
+              ) : null}
             </span>
             <p className="message__text">{message.text}</p>
           </article>

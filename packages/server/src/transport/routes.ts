@@ -17,6 +17,12 @@ import { isValidConversationId, type ConversationStore } from "../session/conver
  *
  * These routes are provider-agnostic. They depend only on the `LlmProvider`
  * interface and contain no provider-specific logic.
+ *
+ * Generation handling here is limited to taking a stamp: the route asks the
+ * conversation's `GenerationManager` to advance and carries the resulting
+ * value. It deliberately does not enforce staleness on the way back in -
+ * fencing results at the point of entry, and the event log that makes
+ * rejections visible, belong to the fencing phase.
  */
 
 type Validated =
@@ -76,7 +82,7 @@ export function registerRoutes(
     return {
       status: "ok",
       service: "interruptsafe-server",
-      phase: 3,
+      phase: 4,
       uptimeSeconds: Number(process.uptime().toFixed(3)),
       timestamp: new Date().toISOString(),
     };
@@ -94,6 +100,16 @@ export function registerRoutes(
 
       const conversationId = conversations.resolve(validated.conversationId);
 
+      // A new user turn advances the conversation to a new generation, which
+      // invalidates any work still outstanding from the previous one. The
+      // stamp is taken here, at the moment this unit of work is created.
+      const generations = conversations.generationFor(conversationId);
+      const generation = generations.bump("new-user-turn");
+      request.log.info(
+        { conversationId, generation, reason: "new-user-turn" },
+        "Generation advanced",
+      );
+
       // The new turn is appended to a copy for the provider, not to the store.
       // Nothing is committed until a reply actually arrives, so a failed request
       // cannot leave a dangling user message in the transcript.
@@ -105,7 +121,7 @@ export function registerRoutes(
       try {
         const result = await provider.generate({ messages: turns });
         conversations.appendExchange(conversationId, validated.message, result.message);
-        return { message: result.message, conversationId };
+        return { message: result.message, conversationId, generation };
       } catch (error) {
         // Upstream failure (network, auth, rate limit). Details go to the log;
         // the client gets a generic message so nothing sensitive is echoed back.

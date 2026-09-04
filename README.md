@@ -6,42 +6,58 @@ and results from the superseded generation can no longer re-enter it.
 
 ## Current development status
 
-**Phase 3 of 16 - real LLM provider behind the existing abstraction.**
+**Phase 4 of 16 - generation versioning.**
 
 You can type a message and get a reply. The reply comes either from a
 **deterministic mock** (the default, requiring no API key and making no network
-call) or from a **real Anthropic model**, selected by `LLM_PROVIDER`. There is
-no streaming, no conversation state on the server, no generation versioning, no
-interruption handling, no speech-to-text and no Rime speech output yet; those
-arrive in later phases.
+call) or from a **real Anthropic model**, selected by `LLM_PROVIDER`. The server
+owns the conversation transcript, and each conversation now carries a
+**generation** that advances on every new user turn.
+
+There is no streaming, no interruption handling, no stale-result fencing
+enforcement, no speech-to-text and no Rime speech output yet; those arrive in
+later phases.
 
 | Phase | Status |
 |-------|--------|
 | 0 - Project planning and architecture | Complete |
 | 1 - Frontend and backend structure | Complete |
 | 2 - Basic text conversation flow | Complete |
-| 3 - Real LLM provider | Complete |
-| 4-16 | Not started |
+| 3 - Real LLM provider and conversation state | Complete |
+| 4 - Generation versioning | Complete |
+| 5-16 | Not started |
 
 ## API
 
 | Endpoint | Purpose |
 |----------|---------|
 | `GET /api/health` | Liveness and current phase |
-| `POST /api/chat` | Single-turn conversation |
+| `POST /api/chat` | One turn of a conversation |
 
 ```
 POST /api/chat
-{ "message": "Hello" }
+{ "message": "Hello", "conversationId": "optional-on-the-first-turn" }
 
-200 -> { "message": "..." }
+200 -> { "message": "...", "conversationId": "...", "generation": 1 }
 400 -> { "error": "..." }
 ```
 
-The endpoint is stateless: no history is sent and none is stored. The browser
-keeps the message list for display only. The route is provider-agnostic - it
-depends only on the `LlmProvider` interface and contains no provider-specific
-logic, and the frontend contains no provider logic and no keys.
+Omit `conversationId` on the first turn; the server allocates one and returns
+it. Send it back on later turns to continue the same conversation. An
+unrecognised id starts a fresh conversation under that id rather than failing,
+so a client survives a server restart.
+
+The server owns the transcript: history is stored per conversation and is sent
+to the provider on every turn. The browser keeps its message list for display
+only. History is held in memory, so it is lost when the server restarts.
+
+`generation` is the conversation's version. It advances on every new user turn,
+and it is what will later let work started under an older generation be
+identified as stale. Generations are independent per conversation.
+
+The route is provider-agnostic - it depends only on the `LlmProvider` interface
+and contains no provider-specific logic, and the frontend contains no provider
+logic and no keys.
 
 `502` is returned if the selected provider fails upstream (network, auth, rate
 limit). Details go to the server log; the client receives a generic message.
