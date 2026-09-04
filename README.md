@@ -30,7 +30,7 @@ yet; those arrive in later phases.
 | 2 - Basic text conversation flow | Complete |
 | 3 - Real LLM provider and conversation state | Complete |
 | 4 - Generation versioning | Complete |
-| 5 - Mock long-running tools | **Skipped so far** |
+| 5 - Mock long-running tools | Complete |
 | 6 - Stale-result fencing | Complete |
 | 7 - Deterministic interruption | Complete |
 | 8-16 | Not started |
@@ -134,6 +134,37 @@ signal so an abandoned turn stops billing tokens. The deterministic mock
 that cannot or will not stop - and demonstrates that the result is discarded
 correctly regardless.
 
+## MOCK tools
+
+Three tools simulate slow background work. **They are mocks.** They make no
+network call and return invented data derived from a hash of the input — never
+real flight, weather, or hotel information, and nothing they produce should be
+presented as genuine.
+
+| Tool | Triggered by a message containing | Arguments parsed |
+|------|-----------------------------------|------------------|
+| `searchFlights` | `flight` | `from <a> to <b>`, or `<a> to <b>` |
+| `searchHotels` | `hotel` | `in <city>` |
+| `checkWeather` | `weather` | `in <city>` |
+
+Selection is **deterministic keyword matching**, not model-driven tool calling —
+so the whole tool demonstration runs with no API key and no network. Hotels are
+checked before weather, so "hotels in Goa with good weather" resolves to the
+hotel search. Any other message is an ordinary chat turn and behaves exactly as
+it did before.
+
+```
+Find flights from Delhi to Mumbai
+Check weather in Mumbai
+Find hotels in Goa
+```
+
+A tool never touches conversation state. It returns a value, and
+`packages/server/src/tools/dispatch.ts` decides whether that value is still
+current enough to shape a reply. The reply then has to survive `fencedCommit`
+as well, so there are two independent chances to reject abandoned work and no
+way for a tool to bypass either.
+
 ## Demonstrating it
 
 The mock replies instantly, leaving no window to press Interrupt. Open one:
@@ -171,6 +202,46 @@ from the abandoned generation finished late and was rejected.
 
 No API key is needed for any of this - the deterministic provider is the
 default, and the whole demonstration runs locally at no cost.
+
+### Interrupting a slow MOCK tool
+
+This is the strongest demonstration, because the tool can be told to ignore
+cancellation entirely:
+
+```
+DEV_MOCK_TOOL_DELAY_MS=1500 DEV_MOCK_TOOL_MODE=stubborn npm run dev
+```
+
+PowerShell:
+
+```
+$env:DEV_MOCK_TOOL_DELAY_MS=1500; $env:DEV_MOCK_TOOL_MODE="stubborn"; npm run dev
+```
+
+Send `Find flights from Delhi to Mumbai`, watch **Mock tool running:
+searchFlights** appear, then press **Interrupt**. The tool ignores the
+cancellation and finishes anyway — and its result is still thrown away:
+
+```
+generation 1
+• Mock tool started            searchFlights
+• Interrupted by user
+generation 2
+• Generation advanced          Advanced by user interruption.
+• Cancellation requested       Advisory only - not relied upon.
+generation 1
+• Mock tool result fenced      ignored cancellation and finished, but its
+                               result belonged to generation 1 while the
+                               conversation is at 2. Discarded.
+generation 3
+• Mock tool completed          searchHotels
+• Result committed
+```
+
+Run the same thing with `DEV_MOCK_TOOL_MODE=cooperative` (the default) and the
+tool stops early instead, recording `Mock tool cancelled`. **Both outcomes are
+correct**, and that is the point: cancellation changes how much work is wasted,
+never whether a stale result can commit.
 
 This delay is a development aid only. It has no effect on the real provider and
 is not part of the correctness model.
@@ -220,6 +291,8 @@ its own, so you cannot mistake fake replies for real ones.
 | `PORT` | no | `8787` | Backend port |
 | `LOG_LEVEL` | no | `info` | Log verbosity |
 | `DEV_DETERMINISTIC_DELAY_MS` | no | `0` | Development aid: artificial mock latency so Interrupt can be pressed by hand |
+| `DEV_MOCK_TOOL_DELAY_MS` | no | `0` | Development aid: artificial MOCK tool latency |
+| `DEV_MOCK_TOOL_MODE` | no | `cooperative` | `cooperative` or `stubborn` — how MOCK tools react to cancellation |
 
 Real environment variables take precedence over values in `.env`, so you can
 override a single setting for one run without editing the file:

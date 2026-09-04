@@ -21,6 +21,19 @@ export interface LlmTurn {
   readonly content: string;
 }
 
+/**
+ * Output of a MOCK tool that ran for this turn and passed its fence.
+ *
+ * Supplied as context for composing the reply. It is not part of the
+ * conversation: it is never stored, and a later turn will not see it unless the
+ * tool runs again.
+ */
+export interface LlmToolContext {
+  readonly tool: string;
+  readonly summary: string;
+  readonly rows: readonly string[];
+}
+
 export interface LlmRequest {
   /**
    * The conversation so far, oldest first, ending with the new user turn.
@@ -30,6 +43,8 @@ export interface LlmRequest {
    * history happens to be stored.
    */
   readonly messages: readonly LlmTurn[];
+  /** Present only when a tool ran for this turn and its result was current. */
+  readonly toolContext?: LlmToolContext;
 }
 
 export interface LlmResult {

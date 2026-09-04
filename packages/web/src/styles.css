@@ -282,6 +282,23 @@ h1 {
   font-style: italic;
 }
 
+.pending--tool {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-style: normal;
+  color: var(--accent);
+  border: 1px dashed var(--accent);
+  border-radius: 8px;
+  padding: 0.45rem 0.7rem;
+  align-self: flex-start;
+}
+
+.pending--tool strong {
+  font-family: ui-monospace, "Cascadia Code", "Consolas", monospace;
+  font-size: 0.85em;
+}
+
 .error {
   margin: 0;
   padding: 0.6rem 0.85rem;

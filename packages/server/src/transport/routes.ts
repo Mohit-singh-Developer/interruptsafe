@@ -7,10 +7,13 @@ import {
   type HealthResponse,
   type InterruptResponse,
 } from "@interruptsafe/shared";
-import type { LlmProvider } from "../agent/llmProvider";
+import type { LlmProvider, LlmToolContext } from "../agent/llmProvider";
 import { isValidConversationId, type ConversationStore } from "../session/conversationState";
 import { commitExchange } from "../session/fencedCommit";
 import type { InFlightRegistry } from "../session/inFlightRegistry";
+import { dispatchTool } from "../tools/dispatch";
+import { detectToolIntent } from "../tools/intent";
+import type { ToolRegistry } from "../tools/tool";
 
 /**
  * HTTP routes.
@@ -105,6 +108,7 @@ export function registerRoutes(
   provider: LlmProvider,
   conversations: ConversationStore,
   inFlight: InFlightRegistry,
+  tools: ToolRegistry,
 ): void {
   app.get("/api/health", async (): Promise<HealthResponse> => {
     return {
@@ -251,7 +255,107 @@ export function registerRoutes(
       events.record("turn-started", "Provider work started for this turn.", generation);
 
       try {
-        const result = await provider.generate({ messages: turns }, handle.signal);
+        // A message may deterministically ask for a MOCK tool. The tool runs
+        // first, and its result must pass its own fence before it is allowed to
+        // shape the reply. That fence is an early exit, not the guarantee - the
+        // reply still has to survive `commitExchange` below.
+        let toolContext: LlmToolContext | undefined;
+        const intent = detectToolIntent(validated.message);
+        const tool = intent === null ? undefined : tools.get(intent.tool);
+
+        if (intent !== null && tool !== undefined) {
+          request.log.info(
+            { conversationId, generation, tool: tool.name },
+            "Mock tool started",
+          );
+          events.record(
+            "tool-started",
+            `Mock tool ${tool.name} started.`,
+            generation,
+            tool.name,
+          );
+
+          const outcome = await dispatchTool(
+            tool,
+            intent.input,
+            generation,
+            generations,
+            handle.signal,
+          );
+
+          if (outcome.kind === "accepted") {
+            events.record(
+              "tool-completed",
+              `Mock tool ${tool.name} returned: ${outcome.result.summary}.`,
+              generation,
+              tool.name,
+            );
+            toolContext = {
+              tool: tool.name,
+              summary: outcome.result.summary,
+              rows: outcome.result.rows,
+            };
+          } else if (outcome.kind === "failed") {
+            request.log.error(
+              { conversationId, generation, tool: tool.name },
+              "Mock tool failed",
+            );
+            events.record(
+              "tool-failed",
+              `Mock tool ${tool.name} failed. Nothing was committed.`,
+              generation,
+              tool.name,
+            );
+            reply.code(502);
+            return { error: "The tool failed to produce a result." };
+          } else {
+            // Cancelled or stale: either way this turn has been superseded and
+            // its work must not shape anything.
+            const currentGeneration = generations.now();
+
+            if (outcome.kind === "cancelled") {
+              request.log.info(
+                { conversationId, generation, tool: tool.name },
+                "Mock tool honoured cancellation",
+              );
+              events.record(
+                "tool-cancelled",
+                `Mock tool ${tool.name} honoured the cancellation request and stopped early.`,
+                generation,
+                tool.name,
+              );
+            } else {
+              request.log.warn(
+                {
+                  conversationId,
+                  tool: tool.name,
+                  resultGeneration: outcome.resultGeneration,
+                  currentGeneration,
+                },
+                "Stale tool result fenced - not used",
+              );
+              events.record(
+                "tool-result-fenced",
+                `Mock tool ${tool.name} ignored cancellation and finished, but its result belonged to generation ${outcome.resultGeneration} while the conversation is at ${currentGeneration}. Discarded.`,
+                outcome.resultGeneration,
+                tool.name,
+              );
+            }
+
+            reply.code(409);
+            return {
+              status: "superseded",
+              conversationId,
+              resultGeneration: generation,
+              currentGeneration,
+            };
+          }
+        }
+
+        const result = await provider.generate(
+          { messages: turns, ...(toolContext === undefined ? {} : { toolContext }) },
+          handle.signal,
+        );
 
         // The single door into the conversation. Synchronous, so the generation
         // cannot move between the check and the append.

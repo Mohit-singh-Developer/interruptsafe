@@ -4,6 +4,8 @@ import { ConfigError, loadConfig, loadEnvFile, type Config } from "./config";
 import { createLlmProvider, type LlmProvider } from "./agent/llmProvider";
 import { ConversationStore } from "./session/conversationState";
 import { InFlightRegistry } from "./session/inFlightRegistry";
+import { createMockTravelTools } from "./tools/mockTravelTools";
+import { ToolRegistry } from "./tools/tool";
 import { registerRoutes } from "./transport/routes";
 
 /**
@@ -57,7 +59,20 @@ const conversations = new ConversationStore();
 // Advisory only - correctness comes from the generation check, not from here.
 const inFlight = new InFlightRegistry();
 
-registerRoutes(app, provider, conversations, inFlight);
+// MOCK tools only. They make no network calls and return synthetic data.
+const tools = new ToolRegistry(
+  createMockTravelTools(config.mockToolDelayMs, config.mockToolMode),
+);
+app.log.info(
+  {
+    tools: tools.names(),
+    mockToolDelayMs: config.mockToolDelayMs,
+    mockToolMode: config.mockToolMode,
+  },
+  "Mock tools registered",
+);
+
+registerRoutes(app, provider, conversations, inFlight, tools);
 
 // Normalise framework-generated failures (malformed JSON, unknown routes) onto
 // the same `{ error }` shape the routes use, so clients parse one error format.

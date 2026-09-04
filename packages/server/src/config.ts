@@ -1,5 +1,6 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { MockToolMode } from "./tools/tool";
 
 /**
  * Environment configuration, parsed and validated once at startup.
@@ -41,6 +42,8 @@ export type LlmEffort = "low" | "medium" | "high" | "xhigh" | "max";
 
 const EFFORTS: readonly LlmEffort[] = ["low", "medium", "high", "xhigh", "max"];
 
+const MOCK_TOOL_MODES: readonly MockToolMode[] = ["cooperative", "stubborn"];
+
 /** Matches the documented value in .env.example. */
 const DEFAULT_MODEL = "claude-opus-5";
 
@@ -65,6 +68,21 @@ export interface Config {
    * effect on the real provider and is not part of the correctness model.
    */
   readonly deterministicDelayMs: number;
+  /**
+   * Artificial latency for the MOCK tools, in milliseconds.
+   *
+   * DEVELOPMENT AID ONLY, default 0. Mock tools return instantly otherwise,
+   * leaving no window in which to interrupt one mid-run.
+   */
+  readonly mockToolDelayMs: number;
+  /**
+   * How MOCK tools react to an abort request.
+   *
+   * `cooperative` (default) stops early; `stubborn` ignores the signal and
+   * returns anyway. Both must produce a correct outcome - the setting exists to
+   * demonstrate that fencing, not cancellation, is what makes it correct.
+   */
+  readonly mockToolMode: MockToolMode;
 }
 
 /** Thrown when configuration is missing or invalid. Message is safe to print. */
@@ -109,17 +127,30 @@ function readAnthropicConfig(): AnthropicConfig {
   return { apiKey, model, effort: effortRaw as LlmEffort };
 }
 
-function readDeterministicDelayMs(): number {
-  const raw = process.env.DEV_DETERMINISTIC_DELAY_MS?.trim();
+/** Shared validation for the development delay knobs. */
+function readDelayMs(variable: string): number {
+  const raw = process.env[variable]?.trim();
   if (raw === undefined || raw.length === 0) return 0;
 
   const parsed = Number(raw);
   if (!Number.isInteger(parsed) || parsed < 0) {
     throw new ConfigError(
-      `DEV_DETERMINISTIC_DELAY_MS must be a non-negative whole number of milliseconds. Received "${raw}".`,
+      `${variable} must be a non-negative whole number of milliseconds. Received "${raw}".`,
     );
   }
   return parsed;
+}
+
+function readMockToolMode(): MockToolMode {
+  const raw = (process.env.DEV_MOCK_TOOL_MODE ?? "cooperative").trim().toLowerCase();
+
+  if (!MOCK_TOOL_MODES.includes(raw as MockToolMode)) {
+    throw new ConfigError(
+      `DEV_MOCK_TOOL_MODE must be one of: ${MOCK_TOOL_MODES.join(", ")}. Received "${raw}".`,
+    );
+  }
+
+  return raw as MockToolMode;
 }
 
 export function loadConfig(): Config {
@@ -131,6 +162,8 @@ export function loadConfig(): Config {
     logLevel: process.env.LOG_LEVEL ?? "info",
     provider,
     ...(provider === "anthropic" ? { anthropic: readAnthropicConfig() } : {}),
-    deterministicDelayMs: readDeterministicDelayMs(),
+    deterministicDelayMs: readDelayMs("DEV_DETERMINISTIC_DELAY_MS"),
+    mockToolDelayMs: readDelayMs("DEV_MOCK_TOOL_DELAY_MS"),
+    mockToolMode: readMockToolMode(),
   };
 }

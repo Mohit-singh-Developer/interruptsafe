@@ -55,11 +55,21 @@ export function createAnthropicProvider(config: AnthropicConfig): LlmProvider {
       // stop billing tokens. This is a saving, not a guarantee: the request may
       // already have completed, and a response that arrives anyway is handled
       // by the generation check when it tries to commit.
+      // Tool output is supplied as request-scoped context rather than as a
+      // conversation turn, so it informs this reply without entering history.
+      const system =
+        request.toolContext === undefined
+          ? SYSTEM_PROMPT
+          : `${SYSTEM_PROMPT}\n\nA mock tool (${request.toolContext.tool}) returned ` +
+            `synthetic data for this turn. Summarise it for the user and make clear ` +
+            `it is mock data, not real information:\n${request.toolContext.summary}\n` +
+            request.toolContext.rows.map((row) => `- ${row}`).join("\n");
+
       const response = await client.messages.create(
         {
           model: config.model,
           max_tokens: MAX_TOKENS,
-          system: SYSTEM_PROMPT,
+          system,
           thinking: { type: "adaptive" },
           output_config: { effort: config.effort },
           messages,

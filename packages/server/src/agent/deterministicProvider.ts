@@ -49,6 +49,17 @@ export function createDeterministicProvider(delayMs = 0): LlmProvider {
       const latest = request.messages.at(-1);
       const text = latest?.content ?? "";
 
+      // When a mock tool ran for this turn, its output composes the reply. The
+      // wording states plainly that the data is synthetic.
+      if (request.toolContext !== undefined) {
+        const { tool, summary, rows } = request.toolContext;
+        return {
+          message:
+            `${summary}. (MOCK DATA from ${tool} - synthetic, not real information.)\n` +
+            rows.map((row) => `- ${row}`).join("\n"),
+        };
+      }
+
       const characters = text.length;
       const words = text.split(/\s+/).filter(Boolean).length;
 

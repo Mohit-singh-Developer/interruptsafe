@@ -44,6 +44,7 @@ export class ConversationEventLog {
     type: ConversationEventType,
     detail: string,
     generation?: Generation,
+    tool?: string,
   ): ConversationEvent {
     const event: ConversationEvent = {
       id: crypto.randomUUID(),
@@ -52,6 +53,7 @@ export class ConversationEventLog {
       at: new Date().toISOString(),
       detail,
       ...(generation === undefined ? {} : { generation }),
+      ...(tool === undefined ? {} : { tool }),
     };
 
     this.events.push(event);

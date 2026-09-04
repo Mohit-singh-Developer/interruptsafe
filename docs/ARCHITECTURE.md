@@ -236,13 +236,20 @@ function commitToolResult(gen: Generation, result: ToolResult): void {
 }
 ```
 
-**As implemented.** The choke point is `packages/server/src/session/fencedCommit.ts`,
-and its function is `commitExchange` - the sketch above anticipated tool results,
-which do not exist yet, but the shape is the same. Nothing else calls
-`appendExchange` directly. The check and the append sit in one synchronous block
-with no `await` between them, so the generation cannot move in the gap between
-judging a result current and writing it. When tools arrive they route their
-results through the same door rather than opening a second one.
+**As implemented.** The choke point for anything entering the conversation is
+`packages/server/src/session/fencedCommit.ts`, and its function is
+`commitExchange`. Nothing else calls `appendExchange` directly. The check and
+the append sit in one synchronous block with no `await` between them, so the
+generation cannot move in the gap between judging a result current and writing
+it.
+
+Tools sit behind a second, earlier check in
+`packages/server/src/tools/dispatch.ts`, matching the sketch above. That one is
+an **early exit rather than a second source of truth**: it rejects a stale tool
+result before a reply is built on it, which saves the work, but a reply that
+somehow got through would still be refused at commit time because its own stamp
+would be stale too. Tools themselves hold no generation and cannot reach
+conversation state, so there is no third path.
 
 **Compensation hooks** matter for credibility: a `bookHotel` call that completed
 *after* its generation was abandoned represents a real side effect. It registers
@@ -536,7 +543,7 @@ Each phase ends with a report and a stop, for manual review and commit.
 | 2 | Text conversation over HTTP: text input, agent abstraction, response display | yes | none |
 | 3 | `ConversationState` extracted and owned | yes | Anthropic |
 | 4 | `GenerationManager` plus generation timeline UI | yes | Anthropic |
-| 5 | Mock long-running tools (labelled MOCK) | yes | Anthropic |
+| 5 | Mock long-running tools (labelled MOCK) | yes | none |
 | 6 | **Stale-result fencing and the event log** | yes | Anthropic |
 | 7 | Deterministic interruption; LLM and tool abort; turn truncation | yes | Anthropic |
 | 8 | **Real-time transport introduced**; microphone, VAD, STT, two-stage commit | yes | + Deepgram |

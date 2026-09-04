@@ -115,7 +115,12 @@ export type ConversationEventType =
   | "cancellation-requested"
   | "result-committed"
   | "result-fenced"
-  | "provider-failed";
+  | "provider-failed"
+  | "tool-started"
+  | "tool-completed"
+  | "tool-cancelled"
+  | "tool-failed"
+  | "tool-result-fenced";
 
 export interface ConversationEvent {
   id: string;
@@ -123,6 +128,8 @@ export interface ConversationEvent {
   type: ConversationEventType;
   /** The generation this transition concerned, where one applies. */
   generation?: number;
+  /** Name of the mock tool involved, on tool events only. */
+  tool?: string;
   /** ISO-8601 timestamp, assigned server-side when the event was recorded. */
   at: string;
   /** Short human-readable summary. Never contains provider internals. */

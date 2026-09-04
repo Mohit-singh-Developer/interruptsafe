@@ -32,7 +32,47 @@ const EVENT_LABELS: Record<ConversationEvent["type"], string> = {
   "result-committed": "Result committed",
   "result-fenced": "Result fenced — not committed",
   "provider-failed": "Provider failed",
+  "tool-started": "Mock tool started",
+  "tool-completed": "Mock tool completed",
+  "tool-cancelled": "Mock tool cancelled",
+  "tool-failed": "Mock tool failed",
+  "tool-result-fenced": "Mock tool result fenced — not used",
 };
+
+/** Event types that represent work being rejected or abandoned. */
+const INTERRUPTED_EVENTS: ReadonlySet<ConversationEvent["type"]> = new Set([
+  "interruption-requested",
+  "result-fenced",
+  "provider-failed",
+  "tool-cancelled",
+  "tool-failed",
+  "tool-result-fenced",
+]);
+
+/**
+ * The mock tool currently running, if any.
+ *
+ * Derived from the event list: a `tool-started` that has not yet been followed
+ * by an outcome for the same tool.
+ */
+function runningTool(events: readonly ConversationEvent[]): string | null {
+  let running: string | null = null;
+
+  for (const event of events) {
+    if (event.type === "tool-started") {
+      running = event.tool ?? "tool";
+    } else if (
+      event.type === "tool-completed" ||
+      event.type === "tool-cancelled" ||
+      event.type === "tool-failed" ||
+      event.type === "tool-result-fenced"
+    ) {
+      running = null;
+    }
+  }
+
+  return running;
+}
 
 interface EventGroup {
   generation: number | undefined;
@@ -85,6 +125,15 @@ export function App() {
   useEffect(() => {
     endOfListRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isSending]);
+
+  // Poll only while a turn is in flight, so slow mock tools are visible as they
+  // run. It stops the moment the turn settles - there is no idle polling.
+  useEffect(() => {
+    if (!isSending) return;
+    const timer = setInterval(() => void refreshActivity(), 700);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSending]);
 
   function append(message: Omit<DisplayMessage, "id">): number {
     const id = nextId.current++;
@@ -197,6 +246,8 @@ export function App() {
     }
   }
 
+  const activeTool = isSending ? runningTool(events) : null;
+
   return (
     <main className="shell">
       <header>
@@ -262,9 +313,18 @@ export function App() {
         )}
 
         {isSending ? (
-          <p className="pending" role="status">
-            Waiting for a response…
-          </p>
+          activeTool !== null ? (
+            <p className="pending pending--tool" role="status">
+              Mock tool running: <strong>{activeTool}</strong>
+              {generation !== null ? (
+                <span className="generation">gen {generation}</span>
+              ) : null}
+            </p>
+          ) : (
+            <p className="pending" role="status">
+              Waiting for a response…
+            </p>
+          )
         ) : null}
 
         <div ref={endOfListRef} />
@@ -317,9 +377,7 @@ export function App() {
                     key={event.id}
                     className={
                       "activity__event" +
-                      (event.type === "result-fenced" ||
-                      event.type === "interruption-requested" ||
-                      event.type === "provider-failed"
+                      (INTERRUPTED_EVENTS.has(event.type)
                         ? " activity__event--interrupted"
                         : "")
                     }
