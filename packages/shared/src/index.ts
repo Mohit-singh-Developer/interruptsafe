@@ -37,8 +37,12 @@ export interface ChatRequest {
   conversationId?: string;
 }
 
-/** Success response body of `POST /api/chat`. */
-export interface ChatResponse {
+/**
+ * A reply that was still current when it finished, and was therefore committed
+ * to the conversation. Served with HTTP 200.
+ */
+export interface ChatOkResponse {
+  status: "ok";
   message: string;
   /** Echoed back so the client can continue the same conversation. */
   conversationId: string;
@@ -50,6 +54,49 @@ export interface ChatResponse {
    * belongs to.
    */
   generation: number;
+}
+
+/**
+ * A reply that finished *after* its generation had already been superseded.
+ *
+ * The work may well have completed successfully - it is not an error, and the
+ * provider may have produced a perfectly good answer. It is simply no longer
+ * allowed to affect the conversation, because the user has moved on. Nothing
+ * was appended to the transcript. Served with HTTP 409.
+ *
+ * This is deliberately a separate shape rather than a flag on a success
+ * response, so a client cannot mistake fenced work for an active result.
+ */
+export interface ChatSupersededResponse {
+  status: "superseded";
+  conversationId: string;
+  /** Generation the fenced work was stamped with when it started. */
+  resultGeneration: number;
+  /** Generation that is current now, and which superseded it. */
+  currentGeneration: number;
+}
+
+/** Response body of `POST /api/chat`, discriminated by `status`. */
+export type ChatResponse = ChatOkResponse | ChatSupersededResponse;
+
+/** Request body of `POST /api/interrupt`. */
+export interface InterruptRequest {
+  conversationId: string;
+}
+
+/** Response body of `POST /api/interrupt`. */
+export interface InterruptResponse {
+  conversationId: string;
+  /** The new current generation. Everything older than this is now stale. */
+  generation: number;
+  /**
+   * How many in-flight requests a cancellation was *requested* for.
+   *
+   * Advisory only. A provider may ignore the request and complete anyway; that
+   * work is fenced when it tries to commit. This number says what was asked
+   * for, never what was achieved.
+   */
+  cancellationRequested: number;
 }
 
 /** Error response body used by any endpoint that rejects a request. */

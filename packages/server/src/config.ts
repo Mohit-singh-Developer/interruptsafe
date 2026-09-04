@@ -57,6 +57,14 @@ export interface Config {
   readonly provider: ProviderKind;
   /** Present only when `provider` is "anthropic". */
   readonly anthropic?: AnthropicConfig;
+  /**
+   * Artificial latency for the deterministic mock, in milliseconds.
+   *
+   * DEVELOPMENT AID ONLY, default 0. The mock replies instantly, which leaves
+   * no window to press Interrupt by hand; this opens one for demos. It has no
+   * effect on the real provider and is not part of the correctness model.
+   */
+  readonly deterministicDelayMs: number;
 }
 
 /** Thrown when configuration is missing or invalid. Message is safe to print. */
@@ -101,6 +109,19 @@ function readAnthropicConfig(): AnthropicConfig {
   return { apiKey, model, effort: effortRaw as LlmEffort };
 }
 
+function readDeterministicDelayMs(): number {
+  const raw = process.env.DEV_DETERMINISTIC_DELAY_MS?.trim();
+  if (raw === undefined || raw.length === 0) return 0;
+
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new ConfigError(
+      `DEV_DETERMINISTIC_DELAY_MS must be a non-negative whole number of milliseconds. Received "${raw}".`,
+    );
+  }
+  return parsed;
+}
+
 export function loadConfig(): Config {
   const provider = readProviderKind();
 
@@ -110,5 +131,6 @@ export function loadConfig(): Config {
     logLevel: process.env.LOG_LEVEL ?? "info",
     provider,
     ...(provider === "anthropic" ? { anthropic: readAnthropicConfig() } : {}),
+    deterministicDelayMs: readDeterministicDelayMs(),
   };
 }

@@ -139,15 +139,19 @@ class GenerationManager {
 ```
 
 **Scope note.** The implemented manager provides `now`, `bump`, `isCurrent` and
-`isStale`, and it owns no `AbortController`. `signalFor` is deliberately absent
-until there is in-flight work worth cancelling; adding it earlier would be a
-speculative API, and the staleness check must stay useful on its own in any
-case. Each conversation owns its own manager, held by `ConversationState`, so
-generations are isolated and are evicted along with the conversation.
+`isStale`, and it owns no `AbortController`. `signalFor` is deliberately absent:
+cancellation capability lives in `session/inFlightRegistry.ts` instead, which
+keeps it structurally separate from the check that actually decides
+correctness. Each conversation owns its own manager, held by
+`ConversationState`, so generations are isolated and are evicted along with the
+conversation.
 
-Enforcement is also staged. The chat route currently takes a stamp when a turn
-begins, but does not yet reject a stale result on the way back in; that check,
-and the event log that makes rejections visible, arrive with the fencing phase.
+Enforcement is implemented. Every turn is stamped when it starts and must pass
+`session/fencedCommit.ts` before it may touch the transcript; a stale result is
+rejected there and nothing is appended. What remains deferred is the *visible*
+event log described in section 12 - rejections are currently reported through
+structured server logs and the `superseded` HTTP response rather than a
+first-class event stream.
 
 Every unit of work is **stamped at the moment it is created**: the LLM turn, each
 individual tool call, each Rime synthesis request, and each outbound audio frame.
@@ -220,9 +224,18 @@ function commitToolResult(gen: Generation, result: ToolResult): void {
 }
 ```
 
+**As implemented.** The choke point is `packages/server/src/session/fencedCommit.ts`,
+and its function is `commitExchange` - the sketch above anticipated tool results,
+which do not exist yet, but the shape is the same. Nothing else calls
+`appendExchange` directly. The check and the append sit in one synchronous block
+with no `await` between them, so the generation cannot move in the gap between
+judging a result current and writing it. When tools arrive they route their
+results through the same door rather than opening a second one.
+
 **Compensation hooks** matter for credibility: a `bookHotel` call that completed
 *after* its generation was abandoned represents a real side effect. It registers
-a compensating action rather than being silently discarded.
+a compensating action rather than being silently discarded. Not yet implemented:
+nothing in the system currently has an external side effect to compensate for.
 
 ## 8. Interruption handling
 

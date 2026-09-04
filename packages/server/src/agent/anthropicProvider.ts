@@ -5,8 +5,9 @@ import type { LlmProvider, LlmRequest, LlmResult } from "./llmProvider";
 /**
  * REAL PROVIDER - Phase 3.
  *
- * Returns one complete response per call. No streaming, no cancellation, no
- * tools; those belong to later phases.
+ * Returns one complete response per call. No streaming and no tools; those
+ * belong to later phases. Cancellation is forwarded to the SDK as an advisory
+ * request - see `generate` below.
  *
  * The Messages API is stateless, so the whole conversation supplied by
  * `ConversationState` is sent on every turn.
@@ -43,21 +44,28 @@ export function createAnthropicProvider(config: AnthropicConfig): LlmProvider {
   return {
     name: `anthropic:${config.model}`,
 
-    async generate(request: LlmRequest): Promise<LlmResult> {
+    async generate(request: LlmRequest, signal: AbortSignal): Promise<LlmResult> {
       // The API is stateless, so the full conversation is sent every turn.
       const messages: Anthropic.MessageParam[] = request.messages.map((turn) => ({
         role: turn.role,
         content: turn.content,
       }));
 
-      const response = await client.messages.create({
-        model: config.model,
-        max_tokens: MAX_TOKENS,
-        system: SYSTEM_PROMPT,
-        thinking: { type: "adaptive" },
-        output_config: { effort: config.effort },
-        messages,
-      });
+      // The signal is forwarded as a request option so an abandoned turn can
+      // stop billing tokens. This is a saving, not a guarantee: the request may
+      // already have completed, and a response that arrives anyway is handled
+      // by the generation check when it tries to commit.
+      const response = await client.messages.create(
+        {
+          model: config.model,
+          max_tokens: MAX_TOKENS,
+          system: SYSTEM_PROMPT,
+          thinking: { type: "adaptive" },
+          output_config: { effort: config.effort },
+          messages,
+        },
+        { signal },
+      );
 
       // A refusal arrives as a successful HTTP response, so it must be checked
       // before reading content - otherwise it looks like an empty reply.

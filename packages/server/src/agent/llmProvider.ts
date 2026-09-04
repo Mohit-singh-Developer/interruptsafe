@@ -10,9 +10,9 @@ import { createDeterministicProvider } from "./deterministicProvider";
  *
  * Scope note: this interface is intentionally non-streaming, matching section
  * 10.1 of docs/ARCHITECTURE.md. Section 10.3 describes the eventual streaming
- * form (`streamTurn(request, signal)`), introduced only in the phase that
- * actually needs token streaming. Phase 3 adds a real provider behind this
- * unchanged shape.
+ * form (`streamTurn(request, signal)`); the `signal` half of that shape is
+ * present now because interruption gives it something to do, while streaming
+ * still waits for the phase that actually needs token-level output.
  */
 
 /** One turn of a conversation as the provider sees it. */
@@ -40,7 +40,20 @@ export interface LlmResult {
 export interface LlmProvider {
   /** Identifier used in logs, so it is obvious which provider served a reply. */
   readonly name: string;
-  generate(request: LlmRequest): Promise<LlmResult>;
+
+  /**
+   * Produces one complete reply.
+   *
+   * `signal` is **advisory**. A provider may honour it and abandon the work
+   * early, or may ignore it entirely and return a perfectly good result after
+   * the caller has moved on. Neither behaviour affects correctness: whether the
+   * result is allowed to touch the conversation is decided afterwards by the
+   * generation check in `session/fencedCommit.ts`, not here.
+   *
+   * A provider that ignores the signal is therefore a legitimate provider, not
+   * a broken one - it simply forfeits the latency and cost saving.
+   */
+  generate(request: LlmRequest, signal: AbortSignal): Promise<LlmResult>;
 }
 
 /**
@@ -60,6 +73,6 @@ export function createLlmProvider(config: Config): LlmProvider {
       return createAnthropicProvider(config.anthropic);
     }
     case "deterministic":
-      return createDeterministicProvider();
+      return createDeterministicProvider(config.deterministicDelayMs);
   }
 }

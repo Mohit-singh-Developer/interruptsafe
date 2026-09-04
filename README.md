@@ -6,17 +6,22 @@ and results from the superseded generation can no longer re-enter it.
 
 ## Current development status
 
-**Phase 4 of 16 - generation versioning.**
+**Interruption correctness core - implemented.**
 
 You can type a message and get a reply. The reply comes either from a
 **deterministic mock** (the default, requiring no API key and making no network
-call) or from a **real Anthropic model**, selected by `LLM_PROVIDER`. The server
-owns the conversation transcript, and each conversation now carries a
-**generation** that advances on every new user turn.
+call) or from a **real Anthropic model**, selected by `LLM_PROVIDER`.
 
-There is no streaming, no interruption handling, no stale-result fencing
-enforcement, no speech-to-text and no Rime speech output yet; those arrive in
-later phases.
+The central guarantee now holds:
+
+> Old work may keep running, but old work can never commit its result once its
+> generation has been superseded.
+
+Advancing the generation is the correctness mechanism. Cancellation is requested
+where a provider supports it, but nothing depends on it succeeding.
+
+There is no streaming, no tools, no speech-to-text and no Rime speech output
+yet; those arrive in later phases.
 
 | Phase | Status |
 |-------|--------|
@@ -25,7 +30,10 @@ later phases.
 | 2 - Basic text conversation flow | Complete |
 | 3 - Real LLM provider and conversation state | Complete |
 | 4 - Generation versioning | Complete |
-| 5-16 | Not started |
+| 5 - Mock long-running tools | **Skipped so far** |
+| 6 - Stale-result fencing | Complete |
+| 7 - Deterministic interruption | Complete |
+| 8-16 | Not started |
 
 ## API
 
@@ -33,34 +41,90 @@ later phases.
 |----------|---------|
 | `GET /api/health` | Liveness and current phase |
 | `POST /api/chat` | One turn of a conversation |
+| `POST /api/interrupt` | Advance the generation, superseding outstanding work |
 
 ```
 POST /api/chat
 { "message": "Hello", "conversationId": "optional-on-the-first-turn" }
 
-200 -> { "message": "...", "conversationId": "...", "generation": 1 }
+200 -> { "status": "ok", "message": "...", "conversationId": "...", "generation": 1 }
+409 -> { "status": "superseded", "conversationId": "...",
+         "resultGeneration": 1, "currentGeneration": 2 }
 400 -> { "error": "..." }
+502 -> { "error": "..." }
 ```
 
-Omit `conversationId` on the first turn; the server allocates one and returns
-it. Send it back on later turns to continue the same conversation. An
-unrecognised id starts a fresh conversation under that id rather than failing,
-so a client survives a server restart.
+The four outcomes are distinguishable without reading any error text:
+
+| Outcome | Status | Meaning |
+|---------|--------|---------|
+| Committed | `200` | Still current when it finished; appended to the transcript |
+| Superseded | `409` | Finished after being superseded; **nothing was appended** |
+| Invalid request | `400` | Validation failure |
+| Provider failure | `502` | Upstream fault; nothing was appended |
+
+A `409` is not an error. The provider may have produced a perfectly good answer -
+it simply arrived after the user moved on, so it was not allowed to affect the
+conversation.
+
+```
+POST /api/interrupt
+{ "conversationId": "..." }
+
+200 -> { "conversationId": "...", "generation": 2, "cancellationRequested": 1 }
+```
+
+`generation` is the guaranteed outcome: once it returns, every outstanding stamp
+is stale. `cancellationRequested` reports how many in-flight requests were
+*asked* to stop - never how many actually did.
+
+Omit `conversationId` on the first chat turn and the server allocates one. Send
+it back on later turns to continue the same conversation. An unrecognised id
+starts a fresh conversation under that id rather than failing, so a client
+survives a server restart. (The browser allocates its own id up front, so that
+Interrupt is available during the very first turn.)
 
 The server owns the transcript: history is stored per conversation and is sent
 to the provider on every turn. The browser keeps its message list for display
 only. History is held in memory, so it is lost when the server restarts.
 
-`generation` is the conversation's version. It advances on every new user turn,
-and it is what will later let work started under an older generation be
-identified as stale. Generations are independent per conversation.
-
 The route is provider-agnostic - it depends only on the `LlmProvider` interface
 and contains no provider-specific logic, and the frontend contains no provider
 logic and no keys.
 
-`502` is returned if the selected provider fails upstream (network, auth, rate
-limit). Details go to the server log; the client receives a generic message.
+## How interruption stays correct
+
+Every turn is stamped with the generation that was current when it started.
+Interrupting advances that generation. When a turn finishes it must pass through
+a single function - `packages/server/src/session/fencedCommit.ts` - which
+compares the stamp against the generation that is current *now*, and refuses to
+append anything if they differ.
+
+That check is synchronous: nothing can advance the generation between judging a
+result current and writing it.
+
+Cancellation is separate and advisory. The Anthropic provider forwards the abort
+signal so an abandoned turn stops billing tokens. The deterministic mock
+**deliberately ignores it**, which makes it a faithful stand-in for a provider
+that cannot or will not stop - and demonstrates that the result is discarded
+correctly regardless.
+
+## Demonstrating it
+
+The mock replies instantly, leaving no window to press Interrupt. Open one:
+
+```
+DEV_DETERMINISTIC_DELAY_MS=1500 npm run dev
+```
+
+Then at http://localhost:5173: send a message, press **Interrupt** before the
+reply lands, and watch the generation advance. The reply still arrives - the
+mock ignored the cancellation - but it comes back marked superseded, is struck
+through as *not committed*, and never enters the conversation. Send another
+message and the reply confirms the fenced turn is absent from history.
+
+This delay is a development aid only. It has no effect on the real provider and
+is not part of the correctness model.
 
 ## Choosing a provider
 
@@ -106,6 +170,7 @@ its own, so you cannot mistake fake replies for real ones.
 | `LLM_EFFORT` | no | `low` | `low`\|`medium`\|`high`\|`xhigh`\|`max` |
 | `PORT` | no | `8787` | Backend port |
 | `LOG_LEVEL` | no | `info` | Log verbosity |
+| `DEV_DETERMINISTIC_DELAY_MS` | no | `0` | Development aid: artificial mock latency so Interrupt can be pressed by hand |
 
 Real environment variables take precedence over values in `.env`, so you can
 override a single setting for one run without editing the file:

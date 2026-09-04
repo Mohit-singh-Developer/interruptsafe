@@ -3,17 +3,20 @@ import type { ApiErrorResponse } from "@interruptsafe/shared";
 import { ConfigError, loadConfig, loadEnvFile, type Config } from "./config";
 import { createLlmProvider, type LlmProvider } from "./agent/llmProvider";
 import { ConversationStore } from "./session/conversationState";
+import { InFlightRegistry } from "./session/inFlightRegistry";
 import { registerRoutes } from "./transport/routes";
 
 /**
- * InterruptSafe backend - Phase 3.
+ * InterruptSafe backend.
  *
- * Serves a health endpoint and a multi-turn chat endpoint. The reply comes from
- * whichever provider `LLM_PROVIDER` selects: a deterministic mock, or a real
- * Anthropic provider. Conversation history is owned by `ConversationState`.
+ * Serves a health endpoint, a multi-turn chat endpoint, and an interruption
+ * endpoint. The reply comes from whichever provider `LLM_PROVIDER` selects: a
+ * deterministic mock, or a real Anthropic provider. Conversation history is
+ * owned by `ConversationState`, and every turn is stamped with a generation
+ * that must still be current before the result may be committed.
  *
- * There is still no streaming, no generation versioning, no cancellation, no
- * tools and no WebSocket transport. Those arrive in later phases.
+ * There is still no streaming, no tools and no WebSocket transport. Those
+ * arrive in later phases.
  */
 
 // Configuration and provider construction happen before the server starts, so a
@@ -50,7 +53,11 @@ app.log.info(
 // Single owner of conversation history for the lifetime of this process.
 const conversations = new ConversationStore();
 
-registerRoutes(app, provider, conversations);
+// Tracks outstanding provider work so an interruption can ask it to stop.
+// Advisory only - correctness comes from the generation check, not from here.
+const inFlight = new InFlightRegistry();
+
+registerRoutes(app, provider, conversations, inFlight);
 
 // Normalise framework-generated failures (malformed JSON, unknown routes) onto
 // the same `{ error }` shape the routes use, so clients parse one error format.

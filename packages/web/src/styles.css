@@ -134,6 +134,42 @@ h1 {
   padding: 0.15rem 0.65rem;
 }
 
+.generation--stale {
+  color: var(--error);
+  border-color: var(--error);
+}
+
+/* ---- Superseded turns and notices ---- */
+
+.message--superseded {
+  opacity: 0.55;
+  border-style: dashed;
+}
+
+.message--superseded .message__text {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+.notice {
+  margin: 0;
+  align-self: stretch;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--muted);
+  border-left: 3px solid var(--error);
+  background: var(--surface);
+  border-radius: 0 8px 8px 0;
+  padding: 0.5rem 0.75rem;
+}
+
+.button--interrupt {
+  background: transparent;
+  color: var(--error);
+  border: 1px solid var(--error);
+  font-weight: 600;
+}
+
 .message__text {
   margin: 0;
   white-space: pre-wrap;
