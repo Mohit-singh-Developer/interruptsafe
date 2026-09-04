@@ -170,6 +170,105 @@ h1 {
   font-weight: 600;
 }
 
+/* ---- Interruption boundary in the transcript ---- */
+
+.interruption-marker {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  align-self: stretch;
+  color: var(--error);
+}
+
+.interruption-marker::before,
+.interruption-marker::after {
+  content: "";
+  flex: 1;
+  border-top: 1px dashed var(--error);
+}
+
+.interruption-marker__label {
+  font-family: ui-monospace, "Cascadia Code", "Consolas", monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+/* ---- Conversation activity timeline ---- */
+
+.activity {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 1rem 1.15rem;
+}
+
+.activity h2 {
+  margin: 0 0 0.75rem;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.activity__group + .activity__group {
+  margin-top: 0.9rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--border);
+}
+
+.activity__generation {
+  margin: 0 0 0.35rem;
+  font-family: ui-monospace, "Cascadia Code", "Consolas", monospace;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.activity__events {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.activity__event {
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+  padding-left: 0.85rem;
+  position: relative;
+  font-size: 0.82rem;
+}
+
+.activity__event::before {
+  content: "•";
+  position: absolute;
+  left: 0;
+  color: var(--muted);
+}
+
+.activity__event--interrupted {
+  color: var(--error);
+}
+
+.activity__event--interrupted::before {
+  color: var(--error);
+}
+
+.activity__label {
+  font-weight: 600;
+}
+
+.activity__detail {
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
 .message__text {
   margin: 0;
   white-space: pre-wrap;

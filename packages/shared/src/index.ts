@@ -99,6 +99,75 @@ export interface InterruptResponse {
   cancellationRequested: number;
 }
 
+/**
+ * Lifecycle transitions worth showing a person.
+ *
+ * These are observability only. Nothing in the system reads an event back to
+ * decide anything: `GenerationManager` remains the authority on what is
+ * current, and `fencedCommit` remains the only gate on what may be committed.
+ * Deleting the whole event system would change what is visible, not what is
+ * correct.
+ */
+export type ConversationEventType =
+  | "turn-started"
+  | "generation-advanced"
+  | "interruption-requested"
+  | "cancellation-requested"
+  | "result-committed"
+  | "result-fenced"
+  | "provider-failed";
+
+export interface ConversationEvent {
+  id: string;
+  conversationId: string;
+  type: ConversationEventType;
+  /** The generation this transition concerned, where one applies. */
+  generation?: number;
+  /** ISO-8601 timestamp, assigned server-side when the event was recorded. */
+  at: string;
+  /** Short human-readable summary. Never contains provider internals. */
+  detail: string;
+}
+
+/**
+ * A committed exchange, as shown in the transcript.
+ *
+ * Only exchanges that passed the fence appear here, which is the same set the
+ * provider is shown.
+ */
+export interface TranscriptExchange {
+  kind: "exchange";
+  generation: number;
+  user: string;
+  assistant: string;
+}
+
+/**
+ * A marker recording that the user interrupted at this point.
+ *
+ * Deliberately not an assistant turn. It is part of the transcript a person
+ * reads, and is never included in the message list handed to the provider.
+ */
+export interface TranscriptInterruption {
+  kind: "interruption";
+  /** The generation the conversation moved to as a result. */
+  generation: number;
+  at: string;
+}
+
+export type TranscriptEntry = TranscriptExchange | TranscriptInterruption;
+
+/** Response body of `GET /api/conversations/:conversationId/activity`. */
+export interface ConversationActivityResponse {
+  conversationId: string;
+  /** The conversation's current generation at the time of reading. */
+  currentGeneration: number;
+  /** Oldest first. Bounded; the oldest entries are dropped as it fills. */
+  events: ConversationEvent[];
+  /** Oldest first. Committed exchanges plus interruption markers. */
+  transcript: TranscriptEntry[];
+}
+
 /** Error response body used by any endpoint that rejects a request. */
 export interface ApiErrorResponse {
   error: string;

@@ -3,6 +3,7 @@ import type {
   ChatOkResponse,
   ChatRequest,
   ChatSupersededResponse,
+  ConversationActivityResponse,
   InterruptRequest,
   InterruptResponse,
 } from "@interruptsafe/shared";
@@ -125,4 +126,32 @@ export async function requestInterrupt(
   }
 
   return result;
+}
+
+/**
+ * Reads the server's record of what happened in this conversation.
+ *
+ * Display only. The server remains authoritative, and nothing here feeds back
+ * into a decision - a failed or stale read costs visibility, never correctness.
+ */
+export async function fetchActivity(
+  conversationId: string,
+): Promise<ConversationActivityResponse> {
+  const response = await fetch(
+    `/api/conversations/${encodeURIComponent(conversationId)}/activity`,
+  );
+
+  const payload: unknown = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    const apiError = (payload as ApiErrorResponse | null)?.error;
+    throw new Error(apiError ?? `Activity read failed with status ${response.status}.`);
+  }
+
+  const activity = payload as ConversationActivityResponse | null;
+  if (activity === null || !Array.isArray(activity.events)) {
+    throw new Error("Malformed activity response from server.");
+  }
+
+  return activity;
 }

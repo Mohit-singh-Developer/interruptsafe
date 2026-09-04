@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { requestInterrupt, sendChatMessage } from "./transport/chatClient";
+import type { ConversationEvent } from "@interruptsafe/shared";
+import {
+  fetchActivity,
+  requestInterrupt,
+  sendChatMessage,
+} from "./transport/chatClient";
 
 /**
  * InterruptSafe web client.
@@ -16,7 +21,39 @@ import { requestInterrupt, sendChatMessage } from "./transport/chatClient";
  * enforces.
  */
 
-type DisplayRole = "user" | "assistant" | "notice";
+type DisplayRole = "user" | "assistant" | "notice" | "interruption";
+
+/** Human-readable labels for the timeline. */
+const EVENT_LABELS: Record<ConversationEvent["type"], string> = {
+  "turn-started": "Provider work started",
+  "generation-advanced": "Generation advanced",
+  "interruption-requested": "Interrupted by user",
+  "cancellation-requested": "Cancellation requested (advisory)",
+  "result-committed": "Result committed",
+  "result-fenced": "Result fenced — not committed",
+  "provider-failed": "Provider failed",
+};
+
+interface EventGroup {
+  generation: number | undefined;
+  events: ConversationEvent[];
+}
+
+/** Groups consecutive events by the generation they belong to. */
+function groupByGeneration(events: readonly ConversationEvent[]): EventGroup[] {
+  const groups: EventGroup[] = [];
+
+  for (const event of events) {
+    const last = groups.at(-1);
+    if (last !== undefined && last.generation === event.generation) {
+      last.events.push(event);
+    } else {
+      groups.push({ generation: event.generation, events: [event] });
+    }
+  }
+
+  return groups;
+}
 
 interface DisplayMessage {
   id: number;
@@ -35,6 +72,8 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   // Latest generation reported by the server; null until the first response.
   const [generation, setGeneration] = useState<number | null>(null);
+  // Server-recorded lifecycle events. Display only.
+  const [events, setEvents] = useState<readonly ConversationEvent[]>([]);
 
   const nextId = useRef(0);
   const endOfListRef = useRef<HTMLDivElement>(null);
@@ -51,6 +90,26 @@ export function App() {
     const id = nextId.current++;
     setMessages((current) => [...current, { ...message, id }]);
     return id;
+  }
+
+  /**
+   * Pulls the server's event record after a lifecycle transition.
+   *
+   * No polling: it runs when something has actually happened. A failure here is
+   * swallowed because the timeline is a view, not a source of truth - losing it
+   * must never interfere with the conversation.
+   */
+  async function refreshActivity(): Promise<void> {
+    const id = conversationId.current;
+    if (id === undefined) return;
+
+    try {
+      const activity = await fetchActivity(id);
+      setEvents(activity.events);
+      setGeneration(activity.currentGeneration);
+    } catch {
+      // Intentionally ignored - observability only.
+    }
   }
 
   function markSuperseded(messageId: number): void {
@@ -104,6 +163,7 @@ export function App() {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
       setIsSending(false);
+      void refreshActivity();
     }
   }
 
@@ -114,15 +174,26 @@ export function App() {
     try {
       const result = await requestInterrupt(id);
       setGeneration(result.generation);
+
+      // The boundary marker. Not an assistant turn, and the server records the
+      // same marker in its transcript, excluded from what the provider is sent.
+      append({
+        role: "interruption",
+        text: "interrupted by user here",
+        generation: result.generation,
+      });
+
       append({
         role: "notice",
         text:
-          `Interrupted. Generation advanced to ${result.generation}. ` +
-          `Cancellation was requested for ${result.cancellationRequested} in-flight ` +
-          `request(s) - advisory only, so the reply may still arrive and will be discarded.`,
+          `Generation advanced to ${result.generation}. Cancellation was requested for ` +
+          `${result.cancellationRequested} in-flight request(s) - advisory only, so the ` +
+          `reply may still arrive and will be discarded.`,
       });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      void refreshActivity();
     }
   }
 
@@ -150,7 +221,16 @@ export function App() {
         ) : null}
 
         {messages.map((message) =>
-          message.role === "notice" ? (
+          message.role === "interruption" ? (
+            <div key={message.id} className="interruption-marker" role="separator">
+              <span className="interruption-marker__label">
+                [{message.text}]
+                {message.generation !== undefined
+                  ? ` → generation ${message.generation}`
+                  : null}
+              </span>
+            </div>
+          ) : message.role === "notice" ? (
             <p key={message.id} className="notice" role="status">
               {message.text}
             </p>
@@ -215,6 +295,44 @@ export function App() {
           {isSending ? "Sending…" : "Send"}
         </button>
       </form>
+
+      <section className="activity" aria-label="Conversation activity">
+        <h2>Conversation activity</h2>
+
+        {events.length === 0 ? (
+          <p className="empty">
+            Lifecycle events recorded by the server will appear here.
+          </p>
+        ) : (
+          groupByGeneration(events).map((group, index) => (
+            <div className="activity__group" key={`${group.generation ?? "none"}-${index}`}>
+              <h3 className="activity__generation">
+                {group.generation === undefined
+                  ? "no generation"
+                  : `generation ${group.generation}`}
+              </h3>
+              <ul className="activity__events">
+                {group.events.map((event) => (
+                  <li
+                    key={event.id}
+                    className={
+                      "activity__event" +
+                      (event.type === "result-fenced" ||
+                      event.type === "interruption-requested" ||
+                      event.type === "provider-failed"
+                        ? " activity__event--interrupted"
+                        : "")
+                    }
+                  >
+                    <span className="activity__label">{EVENT_LABELS[event.type]}</span>
+                    <span className="activity__detail">{event.detail}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))
+        )}
+      </section>
     </main>
   );
 }

@@ -148,10 +148,14 @@ conversation.
 
 Enforcement is implemented. Every turn is stamped when it starts and must pass
 `session/fencedCommit.ts` before it may touch the transcript; a stale result is
-rejected there and nothing is appended. What remains deferred is the *visible*
-event log described in section 12 - rejections are currently reported through
-structured server logs and the `superseded` HTTP response rather than a
-first-class event stream.
+rejected there and nothing is appended.
+
+The visible event log described in section 12 is implemented too, as a bounded
+per-conversation log in `session/conversationEvents.ts`, exposed by
+`GET /api/conversations/:conversationId/activity` and rendered as a timeline in
+the client. It is strictly observability: events are written from decisions that
+have already been made and are never read back to make one, so removing the log
+entirely would change what is visible and not what is correct.
 
 Every unit of work is **stamped at the moment it is created**: the LLM turn, each
 individual tool call, each Rime synthesis request, and each outbound audio frame.
@@ -177,11 +181,19 @@ So on a generation bump the conversation state:
 
 This is what makes guarantee 9 hold in practice rather than in theory.
 
-**Scope note.** The concept is core and is implemented from Phase 7 using a
-coarse approximation (text handed to the TTS layer). The precise,
+**Scope note.** Step 2 is implemented: an interruption appends a marker entry to
+the conversation, and `ConversationState` keeps two views of the same list -
+`transcript` for a reader, which includes markers, and `history` for the
+provider, which projects only committed exchanges. A marker is therefore visible
+without ever becoming input to the model.
+
+Steps 1 and 3 remain deferred. There is nothing to truncate yet: no text has
+been spoken, because there is no TTS, so the spoken watermark has no meaning
+until audio exists. A superseded turn is currently dropped whole rather than
+truncated, with the marker recording where it happened. The precise,
 sequence-accurate watermark - derived from per-chunk playback acknowledgments
-from the browser - requires real audio playback and is therefore implemented in
-Phase 10. Core versioning and fencing are **not** blocked on it.
+from the browser - arrives with real audio playback. Core versioning and fencing
+are **not** blocked on it.
 
 ## 7. Cancellation versus fencing
 

@@ -3,6 +3,7 @@ import {
   MAX_CHAT_MESSAGE_LENGTH,
   type ApiErrorResponse,
   type ChatResponse,
+  type ConversationActivityResponse,
   type HealthResponse,
   type InterruptResponse,
 } from "@interruptsafe/shared";
@@ -26,6 +27,11 @@ import type { InFlightRegistry } from "../session/inFlightRegistry";
  * `commitExchange` before it can affect anything. The route itself holds no
  * cancellation logic and keeps no maps; that ownership lives in
  * `InFlightRegistry`.
+ *
+ * Lifecycle events are recorded alongside those steps for observability. They
+ * are written from decisions that have already been made - never consulted to
+ * make one - and the log they are written to is owned by `ConversationState`,
+ * not by this module.
  */
 
 type ValidatedChat =
@@ -111,6 +117,38 @@ export function registerRoutes(
   });
 
   /**
+   * Conversation activity: the lifecycle events and the reader's transcript.
+   *
+   * Both are served together because the UI refreshes them as one view, and a
+   * second endpoint would mean a second round trip for the same refresh.
+   *
+   * Read-only in the strict sense: it does not create the conversation and does
+   * not disturb eviction order, so polling cannot allocate state or keep a dead
+   * conversation alive. An unknown but well-formed id reads as an empty
+   * conversation rather than an error, matching how unknown ids behave on chat.
+   */
+  app.get<{ Params: { conversationId: string } }>(
+    "/api/conversations/:conversationId/activity",
+    async (request, reply): Promise<ConversationActivityResponse | ApiErrorResponse> => {
+      const { conversationId } = request.params;
+
+      if (!isValidConversationId(conversationId)) {
+        reply.code(400);
+        return { error: CONVERSATION_ID_ERROR };
+      }
+
+      const snapshot = conversations.activity(conversationId);
+
+      return {
+        conversationId,
+        currentGeneration: snapshot.currentGeneration,
+        events: [...snapshot.events],
+        transcript: [...snapshot.transcript],
+      };
+    },
+  );
+
+  /**
    * Interruption.
    *
    * Step 2 is the only step that has to succeed. Advancing the generation is a
@@ -130,18 +168,33 @@ export function registerRoutes(
 
       // 1. Resolve the conversation.
       const conversationId = conversations.resolve(validated.conversationId);
-      request.log.info(
-        { conversationId, outstanding: inFlight.countFor(conversationId) },
-        "Interruption requested",
+      const events = conversations.eventsFor(conversationId);
+      const generations = conversations.generationFor(conversationId);
+      const outstanding = inFlight.countFor(conversationId);
+      request.log.info({ conversationId, outstanding }, "Interruption requested");
+      // Recorded against the generation being left behind, which is the one the
+      // outstanding work belongs to.
+      events.record(
+        "interruption-requested",
+        `User interrupted with ${outstanding} request(s) in flight.`,
+        generations.now(),
       );
 
       // 2. Advance the generation. THIS is the correctness action.
-      const generations = conversations.generationFor(conversationId);
       const generation = generations.bump("user-interruption");
       request.log.info(
         { conversationId, generation, reason: "user-interruption" },
         "Generation advanced",
       );
+      events.record(
+        "generation-advanced",
+        "Advanced by user interruption. Outstanding work is now stale.",
+        generation,
+      );
+
+      // Leave a marker in the transcript so the interruption boundary is
+      // visible to a reader. It is not a turn and never reaches the provider.
+      conversations.markInterruption(conversationId, generation);
 
       // 3. Ask outstanding work to stop. Advisory: it may be ignored, and any
       //    result that arrives anyway is fenced when it tries to commit.
@@ -149,6 +202,11 @@ export function registerRoutes(
       request.log.info(
         { conversationId, cancellationRequested },
         "Cancellation requested (advisory, not guaranteed)",
+      );
+      events.record(
+        "cancellation-requested",
+        `Cancellation requested for ${cancellationRequested} request(s). Advisory only - not relied upon.`,
+        generation,
       );
 
       return { conversationId, generation, cancellationRequested };
@@ -171,11 +229,13 @@ export function registerRoutes(
       // invalidates any work still outstanding from the previous one. The
       // stamp is taken here, at the moment this unit of work is created.
       const generations = conversations.generationFor(conversationId);
+      const events = conversations.eventsFor(conversationId);
       const generation = generations.bump("new-user-turn");
       request.log.info(
         { conversationId, generation, reason: "new-user-turn" },
         "Generation advanced",
       );
+      events.record("generation-advanced", "Advanced by a new user turn.", generation);
 
       // The new turn is appended to a copy for the provider, not to the store.
       // Nothing is committed until the result has passed the generation check,
@@ -188,6 +248,7 @@ export function registerRoutes(
 
       const handle = inFlight.register(conversationId, generation);
       request.log.info({ conversationId, generation }, "Provider work started");
+      events.record("turn-started", "Provider work started for this turn.", generation);
 
       try {
         const result = await provider.generate({ messages: turns }, handle.signal);
@@ -211,6 +272,11 @@ export function registerRoutes(
             },
             "Stale result fenced - not committed",
           );
+          events.record(
+            "result-fenced",
+            `Reply for generation ${outcome.resultGeneration} discarded; the conversation is at generation ${outcome.currentGeneration}.`,
+            outcome.resultGeneration,
+          );
           reply.code(409);
           return {
             status: "superseded",
@@ -223,6 +289,11 @@ export function registerRoutes(
         request.log.info(
           { conversationId, generation, provider: provider.name },
           "Result committed",
+        );
+        events.record(
+          "result-committed",
+          "Reply was still current and was committed to the conversation.",
+          generation,
         );
         return { status: "ok", message: result.message, conversationId, generation };
       } catch (error) {
@@ -239,6 +310,11 @@ export function registerRoutes(
             },
             "Superseded work ended without committing",
           );
+          events.record(
+            "result-fenced",
+            `Work for generation ${generation} ended without committing; the conversation is at generation ${generations.now()}.`,
+            generation,
+          );
           reply.code(409);
           return {
             status: "superseded",
@@ -251,6 +327,12 @@ export function registerRoutes(
         // Upstream failure (network, auth, rate limit). Details go to the log;
         // the client gets a generic message so nothing sensitive is echoed back.
         request.log.error({ err: error }, "Provider failed to generate a reply");
+        // Deliberately generic: provider internals stay in the server log.
+        events.record(
+          "provider-failed",
+          "The provider failed to produce a reply. Nothing was committed.",
+          generation,
+        );
         reply.code(502);
         return { error: "The language model provider failed to respond." };
       } finally {

@@ -49,6 +49,10 @@ export type CommitOutcome =
  *
  * Must stay synchronous. Introducing an `await` between the check and the
  * append would open exactly the race this function exists to close.
+ *
+ * This function records no events. Observability is written by the caller from
+ * the outcome it returns, so that the correctness path stays free of anything
+ * that is not part of the decision.
  */
 export function commitExchange(
   conversations: ConversationStore,
@@ -68,6 +72,11 @@ export function commitExchange(
     };
   }
 
-  conversations.appendExchange(conversationId, userMessage, assistantMessage);
+  conversations.appendExchange(
+    conversationId,
+    resultGeneration,
+    userMessage,
+    assistantMessage,
+  );
   return { committed: true, generation: resultGeneration };
 }

@@ -42,6 +42,7 @@ yet; those arrive in later phases.
 | `GET /api/health` | Liveness and current phase |
 | `POST /api/chat` | One turn of a conversation |
 | `POST /api/interrupt` | Advance the generation, superseding outstanding work |
+| `GET /api/conversations/:conversationId/activity` | Lifecycle events and the reader's transcript |
 
 ```
 POST /api/chat
@@ -77,6 +78,30 @@ POST /api/interrupt
 `generation` is the guaranteed outcome: once it returns, every outstanding stamp
 is stale. `cancellationRequested` reports how many in-flight requests were
 *asked* to stop - never how many actually did.
+
+```
+GET /api/conversations/:conversationId/activity
+
+200 -> { "conversationId": "...", "currentGeneration": 3,
+         "events": [ { "type": "result-fenced", "generation": 1, ... } ],
+         "transcript": [ { "kind": "interruption", ... },
+                         { "kind": "exchange", ... } ] }
+400 -> { "error": "..." }
+```
+
+Two views of the same conversation. `events` is the lifecycle record;
+`transcript` is what a reader sees, which is committed exchanges **plus
+interruption markers**. A marker is not a turn: it never appears in the message
+list sent to the provider, so an interruption is visible without becoming input
+to the model.
+
+The endpoint is strictly read-only - it does not create a conversation and does
+not affect eviction order, so polling cannot allocate state. An unknown but
+well-formed id reads as an empty conversation; a malformed id is a `400`.
+
+Events are observability only. Nothing reads them back to decide anything, and
+the whole event system could be removed without changing which results are
+allowed to commit.
 
 Omit `conversationId` on the first chat turn and the server allocates one. Send
 it back on later turns to continue the same conversation. An unrecognised id
@@ -122,6 +147,30 @@ reply lands, and watch the generation advance. The reply still arrives - the
 mock ignored the cancellation - but it comes back marked superseded, is struck
 through as *not committed*, and never enters the conversation. Send another
 message and the reply confirms the fenced turn is absent from history.
+
+The **Conversation activity** panel below the composer shows the server's own
+record of what happened, grouped by generation:
+
+```
+generation 1
+• Generation advanced      Advanced by a new user turn.
+• Provider work started    Provider work started for this turn.
+• Interrupted by user      User interrupted with 1 request(s) in flight.
+generation 2
+• Generation advanced      Advanced by user interruption.
+• Cancellation requested   Advisory only - not relied upon.
+generation 1
+• Result fenced            Reply for generation 1 discarded.
+generation 3
+• Generation advanced      Advanced by a new user turn.
+• Result committed         Reply was still current and was committed.
+```
+
+The `generation 1` group reappearing after `generation 2` is the point: work
+from the abandoned generation finished late and was rejected.
+
+No API key is needed for any of this - the deterministic provider is the
+default, and the whole demonstration runs locally at no cost.
 
 This delay is a development aid only. It has no effect on the real provider and
 is not part of the correctness model.
