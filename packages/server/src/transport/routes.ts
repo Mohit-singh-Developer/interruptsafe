@@ -1,12 +1,15 @@
 import type { FastifyInstance } from "fastify";
 import {
   MAX_CHAT_MESSAGE_LENGTH,
+  MAX_TTS_TEXT_LENGTH,
+  prepareForSpeech,
   type ApiErrorResponse,
   type ChatResponse,
   type ConversationActivityResponse,
   type HealthResponse,
   type InterruptResponse,
 } from "@interruptsafe/shared";
+import type { RimeClient } from "../tts/rimeClient";
 import type { LlmProvider, LlmToolContext } from "../agent/llmProvider";
 import { isValidConversationId, type ConversationStore } from "../session/conversationState";
 import { commitExchange } from "../session/fencedCommit";
@@ -88,6 +91,53 @@ function validateChatBody(body: unknown): ValidatedChat {
   return { ok: true, message: trimmed, conversationId };
 }
 
+type ValidatedTts =
+  | { ok: true; text: string; conversationId?: string; generation?: number }
+  | { ok: false; error: string };
+
+/** Text to synthesise. Nothing else is accepted from the client. */
+function validateTtsBody(body: unknown): ValidatedTts {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return { ok: false, error: "Request body must be a JSON object." };
+  }
+
+  const { text, conversationId, generation } = body as Record<string, unknown>;
+
+  if (typeof text !== "string") {
+    return { ok: false, error: "Field 'text' is required and must be a string." };
+  }
+
+  if (conversationId !== undefined) {
+    if (typeof conversationId !== "string" || !isValidConversationId(conversationId)) {
+      return { ok: false, error: CONVERSATION_ID_ERROR };
+    }
+  }
+
+  if (generation !== undefined && (!Number.isInteger(generation) || (generation as number) < 0)) {
+    return { ok: false, error: "Field 'generation' must be a non-negative whole number." };
+  }
+
+  const trimmed = text.trim();
+
+  if (trimmed.length === 0) {
+    return { ok: false, error: "Field 'text' must not be empty." };
+  }
+
+  if (trimmed.length > MAX_TTS_TEXT_LENGTH) {
+    return {
+      ok: false,
+      error: `Field 'text' must be at most ${MAX_TTS_TEXT_LENGTH} characters.`,
+    };
+  }
+
+  return {
+    ok: true,
+    text: trimmed,
+    ...(typeof conversationId === "string" ? { conversationId } : {}),
+    ...(typeof generation === "number" ? { generation } : {}),
+  };
+}
+
 /** Interruption always names a conversation - there is no implicit target. */
 function validateInterruptBody(body: unknown): ValidatedInterrupt {
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
@@ -109,16 +159,151 @@ export function registerRoutes(
   conversations: ConversationStore,
   inFlight: InFlightRegistry,
   tools: ToolRegistry,
+  /** Absent when no Rime credential is configured. Voice output is optional. */
+  rime: RimeClient | undefined,
 ): void {
   app.get("/api/health", async (): Promise<HealthResponse> => {
     return {
       status: "ok",
       service: "interruptsafe-server",
-      phase: 4,
       uptimeSeconds: Number(process.uptime().toFixed(3)),
       timestamp: new Date().toISOString(),
+      ttsAvailable: rime !== undefined,
+      speech:
+        rime === undefined
+          ? { provider: "none" }
+          : {
+              provider: "rime",
+              model: rime.model,
+              speaker: rime.speaker,
+              language: rime.language,
+              audioFormat: rime.audioFormat,
+              endpoint: rime.endpoint,
+              transport: "HTTPS request/response per clause; audio to browser over the same HTTP origin",
+            },
     };
   });
+
+  /**
+   * Speech synthesis.
+   *
+   * Kept entirely separate from `/api/chat` because it is a presentation
+   * concern. It reads nothing from `ConversationState`, writes nothing to it,
+   * and has no generation stamp - a reply is synthesised only *after* it has
+   * already been committed, so nothing here can affect what the conversation
+   * contains. A failure costs audio, never text.
+   *
+   * The client sends text and nothing else. It cannot select a voice or model,
+   * and it certainly cannot supply a URL: the upstream endpoint is a constant
+   * inside the Rime client.
+   */
+  app.post(
+    "/api/tts",
+    async (request, reply): Promise<ApiErrorResponse | undefined> => {
+      if (rime === undefined) {
+        reply.code(503);
+        return {
+          error:
+            "Speech output is not configured on this server. Set RIME_API_KEY to enable it.",
+        };
+      }
+
+      const validated = validateTtsBody(request.body);
+      if (!validated.ok) {
+        reply.code(400);
+        return { error: validated.error };
+      }
+
+      // If the caller told us which turn this clause belongs to, skip work the
+      // user has already moved past. This is a COST AND LATENCY OPTIMISATION,
+      // not a correctness gate: the conversation was already settled by
+      // `fencedCommit` before any text reached this endpoint.
+      const { conversationId, generation } = validated;
+      const events =
+        conversationId === undefined ? undefined : conversations.eventsFor(conversationId);
+
+      if (conversationId !== undefined && generation !== undefined) {
+        const generations = conversations.generationFor(conversationId);
+        if (generations.isStale(generation)) {
+          request.log.info(
+            { conversationId, resultGeneration: generation, currentGeneration: generations.now() },
+            "Speech synthesis skipped - turn superseded",
+          );
+          events?.record(
+            "tts-fenced",
+            `Speech for generation ${generation} was not synthesised; the conversation is at generation ${generations.now()}.`,
+            generation,
+          );
+          reply.code(409);
+          return {
+            status: "superseded",
+            resultGeneration: generation,
+            currentGeneration: generations.now(),
+          } as unknown as ApiErrorResponse;
+        }
+      }
+
+      // Stop synthesising if the browser goes away - for example because the
+      // user interrupted. A saving, not a correctness measure.
+      //
+      // This listens on the RESPONSE stream, not the request. `request.raw`
+      // emits "close" once the request body has been fully consumed, which
+      // Fastify does before the handler runs - so listening there aborted every
+      // synthesis a moment after it started. The response stream closes either
+      // when we finish writing or when the peer disconnects, and
+      // `writableFinished` distinguishes the two.
+      const controller = new AbortController();
+      reply.raw.on("close", () => {
+        if (!reply.raw.writableFinished) controller.abort();
+      });
+
+      // Applied again here even though the client already prepared the text.
+      // The server owns the Rime contract, and `prepareForSpeech` is idempotent,
+      // so this costs nothing and guarantees no markdown or arrow ever reaches
+      // the synthesiser regardless of what the caller sent.
+      const spoken = prepareForSpeech(validated.text);
+      // Emptiness is judged on letters and digits, not length: text that was
+      // only markdown reduces to stray punctuation, which is not worth a
+      // synthesis request and would be pronounced as noise.
+      if (!/[a-z0-9]/i.test(spoken)) {
+        reply.code(400);
+        return { error: "Field 'text' contained nothing speakable." };
+      }
+
+      events?.record("tts-started", `Rime synthesis started (${rime.model}/${rime.speaker}).`, generation);
+
+      try {
+        const speech = await rime.synthesize(spoken, controller.signal);
+        events?.record(
+          "tts-audio-ready",
+          `Rime returned ${speech.audio.byteLength} bytes in ${speech.upstreamMs} ms (request duration, includes network).`,
+          generation,
+        );
+        reply.header("Content-Type", speech.contentType);
+        reply.header("Cache-Control", "no-store");
+        reply.header("X-Rime-Upstream-Ms", String(speech.upstreamMs));
+        await reply.send(Buffer.from(speech.audio));
+        return undefined;
+      } catch (error) {
+        events?.record(
+          "tts-failed",
+          "Rime synthesis failed. The committed text is unaffected.",
+          generation,
+        );
+        // Only a message string is logged, never an error object that might
+        // carry request details.
+        request.log.error(
+          { reason: error instanceof Error ? error.message : "unknown" },
+          "Speech synthesis failed",
+        );
+        if (!reply.sent) {
+          reply.code(502);
+          return { error: "Speech synthesis failed." };
+        }
+        return undefined;
+      }
+    },
+  );
 
   /**
    * Conversation activity: the lifecycle events and the reader's transcript.

@@ -4,8 +4,10 @@ import type {
   ChatRequest,
   ChatSupersededResponse,
   ConversationActivityResponse,
+  HealthResponse,
   InterruptRequest,
   InterruptResponse,
+  TtsRequest,
 } from "@interruptsafe/shared";
 
 /**
@@ -154,4 +156,76 @@ export async function fetchActivity(
   }
 
   return activity;
+}
+
+/** Reads server capabilities, chiefly whether speech output is configured. */
+export async function fetchHealth(): Promise<HealthResponse> {
+  const response = await fetch("/api/health");
+  if (!response.ok) throw new Error(`Health check failed with ${response.status}.`);
+  return (await response.json()) as HealthResponse;
+}
+
+/**
+ * Outcome of asking the server to synthesise speech.
+ *
+ * `unavailable` means no Rime credential is configured, which is a normal
+ * zero-cost setup rather than a fault. Both non-audio outcomes are presentation
+ * problems only: the assistant's text has already been committed server-side
+ * and is unaffected.
+ */
+export type SpeechOutcome =
+  | {
+      readonly kind: "audio";
+      readonly blob: Blob;
+      /** Server-measured Rime request duration in ms, when reported. */
+      readonly upstreamMs: number | null;
+    }
+  | { readonly kind: "superseded" }
+  | { readonly kind: "unavailable"; readonly reason: string }
+  | { readonly kind: "failed"; readonly reason: string };
+
+export async function synthesizeSpeech(
+  text: string,
+  signal: AbortSignal,
+  stamp?: { conversationId: string; generation: number },
+): Promise<SpeechOutcome> {
+  const body: TtsRequest =
+    stamp === undefined
+      ? { text }
+      : { text, conversationId: stamp.conversationId, generation: stamp.generation };
+
+  let response: Response;
+  try {
+    response = await fetch("/api/tts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal,
+    });
+  } catch (error) {
+    if (signal.aborted) return { kind: "failed", reason: "Superseded before playback." };
+    return { kind: "failed", reason: "Could not reach the speech endpoint." };
+  }
+
+  if (response.status === 503) {
+    const payload = (await response.json().catch(() => null)) as ApiErrorResponse | null;
+    return { kind: "unavailable", reason: payload?.error ?? "Speech output is not configured." };
+  }
+
+  // The server declined to synthesise because the turn was already superseded.
+  if (response.status === 409) return { kind: "superseded" };
+
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as ApiErrorResponse | null;
+    return { kind: "failed", reason: payload?.error ?? `Speech failed (${response.status}).` };
+  }
+
+  const upstreamHeader = response.headers.get("X-Rime-Upstream-Ms");
+  const upstreamMs = upstreamHeader === null ? null : Number(upstreamHeader);
+
+  return {
+    kind: "audio",
+    blob: await response.blob(),
+    upstreamMs: Number.isFinite(upstreamMs) ? upstreamMs : null,
+  };
 }

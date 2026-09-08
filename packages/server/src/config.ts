@@ -83,6 +83,22 @@ export interface Config {
    * demonstrate that fencing, not cancellation, is what makes it correct.
    */
   readonly mockToolMode: MockToolMode;
+  /**
+   * Rime text-to-speech, when configured.
+   *
+   * OPTIONAL by design. Absent means voice output is unavailable and the app
+   * runs exactly as before - text chat, mock tools, generation fencing and
+   * interruption are all unaffected. Nothing here is ever sent to the browser.
+   */
+  readonly rime?: RimeConfig;
+}
+
+export interface RimeConfig {
+  readonly apiKey: string;
+  readonly speaker: string;
+  readonly model: string;
+  /** Rime language code. English only in this build. */
+  readonly language: string;
 }
 
 /** Thrown when configuration is missing or invalid. Message is safe to print. */
@@ -153,8 +169,70 @@ function readMockToolMode(): MockToolMode {
   return raw as MockToolMode;
 }
 
+/**
+ * Reads Rime settings, or returns undefined when no key is configured.
+ *
+ * Deliberately not an error. Text-to-speech is a presentation feature; the
+ * project must start and demo fully without any credential at all.
+ *
+ * Default model is `mistv3`, Rime's lowest-latency model - the right trade for
+ * an interruption-focused voice agent, where time-to-first-audio matters more
+ * than maximum fidelity.
+ *
+ * Default speaker is `luna`, checked against Rime's live catalog
+ * (https://users.rime.ai/data/voices/all-v2.json) as an English voice available
+ * on **both** `mistv3` and `coda`, so switching model does not silently produce
+ * an invalid combination.
+ *
+ * Note for anyone copying an older config: `celeste` is a `coda` voice and is
+ * NOT available on `mistv3`. That pairing is rejected below rather than being
+ * left to fail at request time.
+ */
+const DEFAULT_RIME_MODEL = "mistv3";
+const DEFAULT_RIME_SPEAKER = "luna";
+
+/** English voices the live catalog lists for both `mistv3` and `coda`. */
+const CROSS_MODEL_SPEAKERS = new Set([
+  "alpine",
+  "astra",
+  "estelle",
+  "flower",
+  "lintel",
+  "luna",
+  "lyra",
+  "pola",
+  "sirius",
+  "vespera",
+]);
+
+function readRimeConfig(): RimeConfig | undefined {
+  const apiKey = process.env.RIME_API_KEY?.trim() ?? "";
+  if (apiKey.length === 0) return undefined;
+
+  const model = process.env.RIME_MODEL?.trim() || DEFAULT_RIME_MODEL;
+  const speaker = process.env.RIME_SPEAKER?.trim() || DEFAULT_RIME_SPEAKER;
+
+  // A known-bad pairing is worth catching at startup rather than as a 4xx on
+  // the first spoken turn of a demo. This only checks the combinations we have
+  // actually verified; an unknown speaker is allowed through.
+  if (model === "mistv3" && speaker === "celeste") {
+    throw new ConfigError(
+      'RIME_SPEAKER "celeste" is a coda voice and is not available on mistv3. ' +
+        `Use a mistv3 English voice such as ${DEFAULT_RIME_SPEAKER}, or set RIME_MODEL=coda.`,
+    );
+  }
+
+  return { apiKey, speaker, model, language: "eng" };
+}
+
+/** True for speakers verified to exist on both mistv3 and coda. */
+export function isCrossModelSpeaker(speaker: string): boolean {
+  return CROSS_MODEL_SPEAKERS.has(speaker);
+}
+
 export function loadConfig(): Config {
   const provider = readProviderKind();
+  const rime = readRimeConfig();
 
   return {
     port: Number(process.env.PORT ?? 8787),
@@ -165,5 +243,6 @@ export function loadConfig(): Config {
     deterministicDelayMs: readDelayMs("DEV_DETERMINISTIC_DELAY_MS"),
     mockToolDelayMs: readDelayMs("DEV_MOCK_TOOL_DELAY_MS"),
     mockToolMode: readMockToolMode(),
+    ...(rime === undefined ? {} : { rime }),
   };
 }

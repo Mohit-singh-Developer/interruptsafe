@@ -15,7 +15,10 @@
     "dev:server": "npm run dev --workspace @interruptsafe/server",
     "dev:web": "npm run dev --workspace @interruptsafe/web",
     "build": "npm run build --workspace @interruptsafe/web",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "verify": "tsx scripts/verify.ts",
+    "verify:http": "tsx scripts/http/httpTools.ts stubborn",
+    "preflight:rime": "tsx scripts/preflight-rime.ts"
   },
   "devDependencies": {
     "concurrently": "^10.0.5",

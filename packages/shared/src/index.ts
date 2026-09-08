@@ -9,17 +9,81 @@
  * and interruption protocol types arrive in later phases.
  */
 
+export {
+  prepareForSpeech,
+  MAX_SPOKEN_WORDS_PER_SENTENCE,
+} from "./speechText";
+
 /** Response body of `GET /api/health`. */
 export interface HealthResponse {
   status: "ok";
   service: "interruptsafe-server";
-  /** Development phase this build corresponds to. */
-  phase: number;
   /** Seconds since the server process started. */
   uptimeSeconds: number;
   /** ISO-8601 timestamp generated when the request was served. */
   timestamp: string;
+  /**
+   * Whether server-side speech synthesis is configured.
+   *
+   * False simply means no Rime credential is present. Everything else - text
+   * chat, mock tools, generation fencing, interruption - works identically
+   * either way, so the client uses this only to show voice output as
+   * unavailable rather than to change behaviour.
+   */
+  ttsAvailable: boolean;
+  /**
+   * Which provider produces spoken output, and how it is configured.
+   *
+   * Deliberately observable: the hackathon brief requires the active speech
+   * provider to be visible rather than implied. Contains no credential.
+   */
+  speech: SpeechProviderInfo;
 }
+
+export interface SpeechProviderInfo {
+  /** `"rime"` when configured, `"none"` when speech output is unavailable. */
+  provider: "rime" | "none";
+  /** Rime model id, e.g. `mistv3`. Absent when unavailable. */
+  model?: string;
+  /** Rime speaker, e.g. `luna`. Absent when unavailable. */
+  speaker?: string;
+  /** Rime language code. Absent when unavailable. */
+  language?: string;
+  /** Audio encoding requested from Rime. */
+  audioFormat?: string;
+  /** Upstream endpoint. Fixed server-side; shown for transparency. */
+  endpoint?: string;
+  /** How audio reaches the browser. */
+  transport?: string;
+}
+
+/**
+ * Request body of `POST /api/tts`.
+ *
+ * The client sends text plus, optionally, the conversation and generation the
+ * text belongs to. It cannot choose a voice, a model, or a URL: the upstream
+ * endpoint is fixed server-side.
+ *
+ * The generation is an **optimisation**, not a correctness mechanism. When
+ * supplied it lets the server skip synthesising audio for a turn the user has
+ * already moved past, which saves credits and latency. Correctness of the
+ * conversation was already settled before any text reached this endpoint.
+ */
+export interface TtsRequest {
+  text: string;
+  conversationId?: string;
+  generation?: number;
+}
+
+/** `POST /api/tts` refused to synthesise because the turn was superseded. */
+export interface TtsSupersededResponse {
+  status: "superseded";
+  resultGeneration: number;
+  currentGeneration: number;
+}
+
+/** Maximum accepted length of text to synthesise, in characters. */
+export const MAX_TTS_TEXT_LENGTH = 1200;
 
 /**
  * Request body of `POST /api/chat`.
@@ -120,7 +184,11 @@ export type ConversationEventType =
   | "tool-completed"
   | "tool-cancelled"
   | "tool-failed"
-  | "tool-result-fenced";
+  | "tool-result-fenced"
+  | "tts-started"
+  | "tts-audio-ready"
+  | "tts-fenced"
+  | "tts-failed";
 
 export interface ConversationEvent {
   id: string;

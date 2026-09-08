@@ -170,6 +170,85 @@ h1 {
   font-weight: 600;
 }
 
+/* ---- Microphone control ---- */
+
+.button--mic {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.button--mic-live {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.button--mic-loud {
+  color: var(--error);
+  border-color: var(--error);
+}
+
+/* ---- Voice status bar ---- */
+
+.voicebar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 0.6rem 0.8rem;
+}
+
+.voicebar__row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  font-size: 0.85rem;
+}
+
+.voicebar__badge {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.voicebar__hint {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.voicebar__transcript {
+  font-style: italic;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.voicebar__row--active .voicebar__badge {
+  color: var(--error);
+}
+
+.voicebar__row--speaking .voicebar__badge {
+  color: var(--accent);
+}
+
+.voicebar__row--warn .voicebar__badge {
+  color: var(--error);
+}
+
+.mic-dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+}
+
 /* ---- Interruption boundary in the transcript ---- */
 
 .interruption-marker {
@@ -192,6 +271,77 @@ h1 {
   font-size: 0.72rem;
   letter-spacing: 0.03em;
   white-space: nowrap;
+}
+
+/* ---- Provider + metrics panel ---- */
+
+.panel {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 1rem 1.15rem;
+}
+
+.panel h2 {
+  margin: 0 0 0.5rem;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.panel__subheading {
+  margin-top: 1rem !important;
+}
+
+.panel__caveat {
+  margin: 0 0 0.6rem;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.provider {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.88rem;
+}
+
+.provider--active strong {
+  color: var(--accent);
+}
+
+.provider--none strong {
+  color: var(--error);
+}
+
+.provider__detail {
+  font-family: ui-monospace, "Cascadia Code", "Consolas", monospace;
+  font-size: 0.72rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.metrics {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.2rem 1rem;
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.metrics dt {
+  color: var(--muted);
+}
+
+.metrics dd {
+  margin: 0;
+  font-family: ui-monospace, "Cascadia Code", "Consolas", monospace;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 /* ---- Conversation activity timeline ---- */

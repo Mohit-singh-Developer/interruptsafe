@@ -72,7 +72,7 @@ export function createDeterministicProvider(delayMs = 0): LlmProvider {
       const base =
         `You said: "${text}" ` +
         `(${words} ${words === 1 ? "word" : "words"}, ${characters} characters). ` +
-        `This is a deterministic Phase 2 response - no language model was called.`;
+        `This is a deterministic mock response - no language model was called.`;
 
       return {
         message:

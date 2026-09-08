@@ -6,6 +6,7 @@ import { ConversationStore } from "./session/conversationState";
 import { InFlightRegistry } from "./session/inFlightRegistry";
 import { createMockTravelTools } from "./tools/mockTravelTools";
 import { ToolRegistry } from "./tools/tool";
+import { createRimeClient } from "./tts/rimeClient";
 import { registerRoutes } from "./transport/routes";
 
 /**
@@ -72,7 +73,19 @@ app.log.info(
   "Mock tools registered",
 );
 
-registerRoutes(app, provider, conversations, inFlight, tools);
+// Speech output is optional. Without a Rime credential the client simply shows
+// voice output as unavailable; nothing else changes.
+const rime = config.rime === undefined ? undefined : createRimeClient(config.rime);
+app.log.info(
+  rime === undefined
+    ? { ttsAvailable: false }
+    : { ttsAvailable: true, speaker: rime.speaker, model: rime.model },
+  rime === undefined
+    ? "Rime TTS not configured - voice output disabled (text mode unaffected)"
+    : "Rime TTS configured",
+);
+
+registerRoutes(app, provider, conversations, inFlight, tools, rime);
 
 // Normalise framework-generated failures (malformed JSON, unknown routes) onto
 // the same `{ error }` shape the routes use, so clients parse one error format.

@@ -78,20 +78,24 @@ TypeScript end to end, in an npm workspaces monorepo.
 | Shared | `packages/shared` - wire protocol and generation types, zero dependencies |
 | LLM | Anthropic SDK behind an `LlmProvider` interface (section 10) |
 | TTS | **Rime - primary and only**; there is no fallback TTS in this codebase |
-| STT | Deferred to Phase 8, behind an `SttProvider` interface |
+| STT | Browser-native Web Speech API - zero cost, no key. Deepgram remains an unused option |
 | Package manager | npm workspaces (npm 10+, no pnpm dependency) |
 
 **Why TypeScript on both sides.** Every cancellable operation in this system -
-the Anthropic stream, the Rime request, the STT socket, and our own tools -
-accepts the same `AbortSignal`. One `AbortController` per generation propagates
-to all of them through a single uniform mechanism. Node 22 provides
-`AbortController`, `AbortSignal.any()`, and `AbortSignal.timeout()` natively.
+the Anthropic request, the Rime request, and our own tools - accepts the same
+`AbortSignal`, so one mechanism reaches all of them. **As implemented** there is
+one `AbortController` per in-flight request, held by `InFlightRegistry` and
+keyed by conversation, rather than one per generation: an interruption aborts
+every controller registered for that conversation. Keeping the controllers out
+of `GenerationManager` is deliberate, so the staleness check stays independent
+of anything cancellation does. Node 22 provides `AbortController`,
+`AbortSignal.any()`, and `AbortSignal.timeout()` natively.
 Sharing the protocol types between client and server also means the generation
 contract cannot drift between the two sides.
 
-## 5. Planned repository layout
+## 5. Repository layout
 
-Created incrementally, not all at once. Phase 1 creates the skeleton.
+This is the layout **as it actually exists**, not a plan.
 
 ```
 interruptsafe/
@@ -101,26 +105,39 @@ interruptsafe/
   README.md
   docs/
     ARCHITECTURE.md            # this file
-    RIME_EVIDENCE.md           # Phase 15
-    DEMO_SCRIPT.md             # Phase 16
+    RIME_EVIDENCE.md           # hard voice claim, acceptance test, results
+    evidence/                  # committed Rime audio sample
   packages/
-    shared/                    # protocol + generation types
+    shared/
+      src/index.ts             # wire contracts + generation/event/transcript types
     server/
       src/
-        session/               # Session, ConversationState, GenerationManager
-        agent/                 # LLM provider, agent loop, sentence chunker
-        tools/                 # registry, dispatch (the fencing choke point)
-        tts/                   # Rime client
-        stt/                   # SttProvider interface + implementations
-        transport/             # HTTP routes; WebSocket server and wire codec from Phase 8
-        obs/                   # event log, metrics
+        config.ts              # env parsing; Rime and Anthropic both optional
+        session/               # ConversationState, GenerationManager,
+                               #   InFlightRegistry, fencedCommit, event log
+        agent/                 # LlmProvider, deterministic mock, Anthropic
+        tools/                 # tool interface, MOCK travel tools, intent,
+                               #   dispatch (the tool fencing boundary)
+        tts/                   # Rime client (optional)
+        transport/             # HTTP routes
     web/
       src/
-        audio/                 # capture, VAD, playback
-        transport/             # HTTP client; WebSocket client from Phase 8
-        state/                 # local mirror of server generation
-        ui/                    # transcript, generation timeline, event log
+        audio/                 # VAD, browser speech recognition, playback
+        transport/             # typed HTTP client
+        App.tsx                # conversation, voice bar, activity timeline
 ```
+
+Two directories from the original plan were never created, because what they
+were for arrived differently. There is no `server/src/stt/`: speech recognition
+runs in the browser, so no server-side provider interface was needed. There is
+no `server/src/obs/`: the event log lives with the state it describes, in
+`session/conversationEvents.ts`. On the web side there is no separate `state/`
+or `ui/` split - the client is small enough that `App.tsx` plus `audio/` and
+`transport/` is clearer than more folders.
+
+`docs/RIME_EVIDENCE.md` holds the hard voice claim, its acceptance test, and the
+measured results. `docs/evidence/` holds a committed Rime audio sample backing
+those results.
 
 ## 6. Conversation versioning
 
@@ -202,12 +219,17 @@ them is the most common way this class of system goes wrong.
 
 ### Cancellation - best-effort, saves latency and money
 
-One `AbortController` per generation. Child operations derive their signal via
-`AbortSignal.any([generationSignal, AbortSignal.timeout(ms)])`. On a bump:
+**As implemented:** one `AbortController` per in-flight request, registered in
+`session/inFlightRegistry.ts` against its conversation and its generation stamp.
+An interruption aborts every controller registered for that conversation. On a
+bump:
 
-- the Anthropic stream is aborted, stopping token generation;
-- the in-flight Rime request is aborted, stopping synthesis mid-clause;
-- the generation signal is passed into every dispatched tool.
+- the Anthropic request is aborted, so an abandoned turn stops billing tokens;
+- the signal is passed into every dispatched tool;
+- browser-side, any Rime playback is stopped and its synthesis request aborted.
+
+The registry holds no authority over what may commit - it is consulted by
+nothing when that decision is made.
 
 Cancellation is **advisory**. A third-party SDK may ignore the signal. A booking
 that has already been committed downstream cannot be un-issued. Therefore
@@ -273,6 +295,28 @@ arrive within roughly 600 ms, the trigger was a cough or a background noise:
 playback resumes and the generation was never disturbed. Bumping the generation
 on raw VAD alone produces an agent that interrupts itself constantly.
 
+**As implemented.** The two-stage commit is in place, in
+`packages/web/src/App.tsx` over `audio/`:
+
+- **Tier 1** (`voiceActivityDetector.ts`) - sustained loudness flushes the
+  playback queue immediately, so the user stops hearing the abandoned answer at
+  once. It does **not** advance the generation, and the UI says so explicitly.
+- **Tier 2** (`useSpeechRecognition.ts`) - the first *recognised words*, interim
+  or final, confirm that the loudness was speech. Only then is
+  `POST /api/interrupt` called and the generation advanced.
+- **Timeout** - if nothing is recognised within
+  `VOICE_CONFIRM_TIMEOUT_MS` (1200 ms), the trigger is discarded as background
+  noise and the conversation is left entirely alone.
+- **Tier 3** - the Interrupt button still advances the generation immediately,
+  and is what the automated tests drive.
+
+Two honest caveats. Playback that tier 1 stopped is not resumed if tier 2 never
+confirms - the audio has already been discarded, so a cough costs the remainder
+of one spoken reply, though not the conversation. And in a browser with no
+speech recognition (Firefox) there is no tier 2 available, so tier 1 confirms
+directly; the UI states which case applies rather than implying confirmation
+happened.
+
 **Echo guard** (Phase 8). Without it the agent's own voice triggers its own
 barge-in detector: request `echoCancellation`, `noiseSuppression`, and
 `autoGainControl` on the microphone stream; raise the VAD threshold while agent
@@ -323,7 +367,34 @@ guaranteed effect, and fencing remains the guarantee that makes it correct.
 would invalidate the project's Rime evidence entirely, so its absence is a
 deliberate architectural constraint rather than an omission.
 
-Pipeline:
+**As implemented** the pipeline is:
+
+```
+committed reply -> prepareForSpeech -> clause chunker (browser)
+                -> one HTTPS request per clause -> WAV clip
+                -> generation-stamped playback queue -> speaker
+```
+
+`prepareForSpeech` (`packages/shared/src/speechText.ts`) applies Rime's own
+guidance for text destined to be heard rather than read: markdown and bullets
+removed, arrows and symbols spoken as words, asides flattened, non-dollar
+currency written out, sentences kept under 25 words, and no SSML or inline tags
+ever emitted. It runs on the client before chunking and again on the server
+before the Rime call; it is idempotent, so applying it twice is harmless. It
+alters only the spoken rendering - the committed transcript is untouched.
+
+Chunking happens in `web/src/audio/clauseChunker.ts`, after the reply is
+committed, because this build does not stream LLM tokens. It still buys the
+important property: speech starts after the *first* clause is synthesised
+rather than the whole reply, and the next clause is fetched while the previous
+one plays. Each clause is also an independently generation-stamped playback
+unit, so an interruption discards at clause granularity.
+
+Rime documents HTTP and WebSocket streaming; neither is used here. One request
+per clause is a documented, verifiable path, and inventing a streaming protocol
+that could not be tested without a credential would have been worse.
+
+The original plan below assumed token streaming and a WebSocket transport:
 
 ```
 LLM token stream -> sentence chunker -> Rime (per clause) -> PCM frames
@@ -343,10 +414,26 @@ Uncompressed audio over a local WebSocket is effectively free.
 count, time-to-first-byte, total bytes returned, and whether it was aborted
 mid-stream.
 
-**Unverified detail.** Rime's exact endpoint, parameter names, model identifiers,
-and streaming variant have **not** been verified against live documentation at
-the time of writing. Phase 9 begins by reading Rime's current documentation and
-codes against that, not against assumption. `RIME_API_KEY` is server-side only.
+**Verified and implemented.** Checked against Rime's own quickstart before the
+client was written: `POST https://users.rime.ai/v1/rime-tts`, `Authorization:
+Bearer <key>`, `Accept: audio/wav`, body `{ text, speaker, modelId }`, where
+`modelId` is `mistv3` (lowest latency) or `coda` (flagship). No undocumented
+parameters are sent. The client lives in `packages/server/src/tts/rimeClient.ts`
+and the endpoint URL is a module constant, so nothing the browser sends can
+redirect the request. `RIME_API_KEY` is server-side only and is never logged.
+
+**Optional, by deliberate choice.** Rime remains the only text-to-speech path -
+there is still no fallback synthesiser - but its absence is not a failure. With
+no credential the server starts normally, `GET /api/health` reports
+`ttsAvailable: false`, `POST /api/tts` answers `503`, and the client shows voice
+output as unavailable. Text chat, mock tools, generation fencing and
+interruption are all unaffected, so the project can be developed and demonstrated
+at no cost.
+
+**Synthesis cannot affect conversation correctness.** Speech is generated from a
+reply that has *already* passed `fencedCommit`. `/api/tts` is a separate endpoint
+that reads nothing from `ConversationState`, writes nothing to it, and carries no
+generation stamp. A synthesis failure costs audio and never text.
 
 ## 10. LLM provider abstraction
 
@@ -385,11 +472,15 @@ single `createLlmProvider()` factory, and that factory is the seam: the
 conversation route depends only on the interface and never on a concrete
 provider.
 
-### 10.2 Phase 3 - a real provider behind the same abstraction
+### 10.2 A real provider behind the same abstraction
 
-Phase 3 adds a real implementation and selects it inside `createLlmProvider()`.
-The conversation route is not rewritten, because it never referred to anything
-but `LlmProvider`.
+A real implementation is added and selected inside `createLlmProvider()`. The
+conversation route is not rewritten, because it never referred to anything but
+`LlmProvider`.
+
+(This shipped under the "Phase 3" label while the phase table below lists
+`ConversationState` at row 3; both landed, in the opposite order. The numbering
+is left as it happened rather than rewritten.)
 
 The default real implementation targets the Anthropic SDK. Model id and reasoning
 effort come from environment variables (`LLM_MODEL`, `LLM_EFFORT`), so changing
