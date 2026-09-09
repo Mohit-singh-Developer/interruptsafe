@@ -1,6 +1,5 @@
 /**
- * Throwaway verification of GenerationManager behaviour.
- * Lives in the scratchpad, NOT the repo. The real test suite is Phase 14.
+ * Verification of GenerationManager behaviour.
  */
 const base = "../../packages/server/src/session";
 const gm = (await import(`${base}/generationManager.ts`)) as any;

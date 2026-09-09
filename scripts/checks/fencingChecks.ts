@@ -1,6 +1,6 @@
 /**
  * Verification of the interruption correctness core.
- * Lives in the scratchpad, NOT the repo. The real test suite is Phase 14.
+ * This IS the test suite for fencing; npm run verify runs it.
  */
 const base = "../../packages/server/src/session";
 const cs = (await import(`${base}/conversationState.ts`)) as any;

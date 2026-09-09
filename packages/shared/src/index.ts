@@ -5,8 +5,8 @@
  * package.json) so there is no build step. Both `tsx` on the server and Vite in
  * the browser resolve `.ts` directly.
  *
- * Contains the health contract and a multi-turn chat contract. The generation
- * and interruption protocol types arrive in later phases.
+ * Contains the health, chat, interruption, activity and speech contracts -
+ * everything both sides must agree on, and nothing either side owns alone.
  */
 
 export {
@@ -88,8 +88,10 @@ export const MAX_TTS_TEXT_LENGTH = 1200;
 /**
  * Request body of `POST /api/chat`.
  *
- * Generation stamps and interruption flags belong to later phases and must not
- * be added here until the phase that needs them.
+ * Deliberately carries no generation stamp. The generation a turn belongs to
+ * is assigned by the server when the turn starts, so a client cannot name it -
+ * and therefore cannot ask for its work to be judged against a generation of
+ * its own choosing.
  */
 export interface ChatRequest {
   message: string;

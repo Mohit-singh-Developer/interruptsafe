@@ -272,7 +272,7 @@ variables for them.
 | Speaker | `luna` |
 | Language | `eng` |
 | Endpoint | `https://users.rime.ai/v1/rime-tts` (hard-coded constant; the browser cannot influence it) |
-| Region | Rime default global host `users.rime.ai`. **No regional endpoint is selected**, and none is configurable |
+| Region | **US West (us-west-2)**. `users.rime.ai` is Rime’s documented default alias for `users-west`; the alternative is `users-east` (us-east-1). Rime publishes US regions only, so there is no endpoint nearer a demo recorded outside the US |
 | Audio format | `audio/wav` (requested via `Accept`) |
 | Transport | HTTPS request/response, **one request per clause**; audio reaches the browser over the app's own origin and plays via `HTMLAudioElement` |
 | Request body | `{ text, speaker, modelId, lang }` — no undocumented parameters |
@@ -380,13 +380,17 @@ Stated plainly, because a reviewer will hit these.
     server process and are lost on restart. There is no database and no
     horizontal scaling: generation state is per-process, so a second instance
     would not share it.
-11. **Tool selection is deterministic keyword matching**, not model-driven tool
+11. **The default provider does not reason.** It is a deterministic stub that
+    handles the three travel intents and otherwise says plainly that it cannot
+    help. Set `LLM_PROVIDER=anthropic` for real replies. The stub is the
+    default because it makes the acceptance test reproducible at zero cost.
+12. **Tool selection is deterministic keyword matching**, not model-driven tool
     calling. This keeps the whole tool demonstration free and offline, but it
     is not how a production agent would choose a tool.
-12. **The travel tools are mocks.** They return synthetic data derived from a
+13. **The travel tools are mocks.** They return synthetic data derived from a
     hash of the input — never real flight, hotel or weather information.
-13. **No token streaming.** A reply is committed whole, then spoken.
-14. **Interruption is bounded by recognition latency.** Tier 1 stops audio on
+14. **No token streaming.** A reply is committed whole, then spoken.
+15. **Interruption is bounded by recognition latency.** Tier 1 stops audio on
     loudness within milliseconds, but the generation only advances once words
     are recognised, or after the 1200 ms confirmation window expires.
 
@@ -513,6 +517,18 @@ npm run dev
 ```
 
 Replies are a pure function of the input, so they are predictable and testable.
+
+**It does not reason.** It is a stub that recognises the three travel intents
+and otherwise states its own scope. That is deliberate: determinism is what
+makes the acceptance test in
+[docs/RIME_EVIDENCE.md](docs/RIME_EVIDENCE.md) reproducible by anyone, with no
+credential and no network. The replies are written to be *spoken* rather than
+read, because everything committed here is handed to Rime and read aloud to
+someone who cannot look at a screen.
+
+Swap in a real model at any time with `LLM_PROVIDER=anthropic`; nothing in the
+correctness path changes, and the fencing proofs assert on the server transcript
+rather than on any provider’s wording, so they hold either way.
 
 ### Real Anthropic provider
 
@@ -645,12 +661,19 @@ voice activity detection, the generation-stamped playback queue, speech text
 preparation, and tool intent parsing. It needs no credential and no network, and exits non-zero on
 failure.
 
-`npm run preflight:rime` confirms `.env` is gitignored and untracked, that
+`npm run preflight:rime` is this project's **Rime configuration and secret
+preflight**. It confirms `.env` is gitignored and untracked, that
 `.env.example` holds placeholders only, that the credential appears in no
 tracked file, and that the configured model/language/speaker triple exists in
-Rime's live catalogue. With a credential present it also performs one real
-synthesis and verifies the audio is not silence. Without one it skips that step
-cleanly.
+Rime's **live** catalogue — queried at run time rather than compared against a
+copied list, so it cannot go stale. With a credential present it also performs
+one real synthesis and verifies the returned audio is not silence. Without one
+it skips that step cleanly and still passes.
+
+A full passing run is reproduced in
+[docs/RIME_EVIDENCE.md](docs/RIME_EVIDENCE.md) §5.2, along with proof that it
+fails correctly: run it with `RIME_SPEAKER=celeste` and it rejects the
+combination instead of spending a credit on a request that cannot work.
 
 The HTTP suites need a running server, started with both development delays —
 without them a turn finishes before it can be interrupted and the suites fail

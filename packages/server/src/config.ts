@@ -195,19 +195,19 @@ function readMockToolMode(): MockToolMode {
 const DEFAULT_RIME_MODEL = "mistv3";
 const DEFAULT_RIME_SPEAKER = "luna";
 
-/** English voices the live catalog lists for both `mistv3` and `coda`. */
-const CROSS_MODEL_SPEAKERS = new Set([
-  "alpine",
-  "astra",
-  "estelle",
-  "flower",
-  "lintel",
-  "luna",
-  "lyra",
-  "pola",
-  "sirius",
-  "vespera",
-]);
+/*
+ * No speaker list is embedded here on purpose.
+ *
+ * Rime's build rules ask for the current catalogue at submission time rather
+ * than a copied list, and a hard-coded one goes stale silently - it would start
+ * rejecting valid voices, or accepting withdrawn ones, with no signal. The
+ * catalogue is checked live instead by `npm run preflight:rime`, against
+ * https://users.rime.ai/data/voices/all-v2.json.
+ *
+ * The single pairing rejected below is different in kind: it is a specific
+ * combination confirmed by hand to return a 400 from Rime, and it was this
+ * project's own default until that was found.
+ */
 
 function readRimeConfig(): RimeConfig | undefined {
   const apiKey = process.env.RIME_API_KEY?.trim() ?? "";
@@ -229,9 +229,26 @@ function readRimeConfig(): RimeConfig | undefined {
   return { apiKey, speaker, model, language: "eng" };
 }
 
-/** True for speakers verified to exist on both mistv3 and coda. */
-export function isCrossModelSpeaker(speaker: string): boolean {
-  return CROSS_MODEL_SPEAKERS.has(speaker);
+/**
+ * Reads the listening port.
+ *
+ * Validated like every other numeric setting rather than trusted. `Number()` on
+ * a typo yields NaN, which Fastify reports far from the cause, and a value
+ * outside the valid range fails at bind time with an equally unhelpful message.
+ * The Vite dev proxy resolves this same variable, so a bad value here would
+ * also silently point the browser at the wrong port.
+ */
+function readPort(): number {
+  const raw = process.env.PORT?.trim();
+  if (raw === undefined || raw.length === 0) return 8787;
+
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) {
+    throw new ConfigError(
+      `PORT must be a whole number between 1 and 65535. Received "${raw}".`,
+    );
+  }
+  return parsed;
 }
 
 export function loadConfig(): Config {
@@ -239,7 +256,7 @@ export function loadConfig(): Config {
   const rime = readRimeConfig();
 
   return {
-    port: Number(process.env.PORT ?? 8787),
+    port: readPort(),
     host: process.env.HOST ?? "127.0.0.1",
     logLevel: process.env.LOG_LEVEL ?? "info",
     provider,

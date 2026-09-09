@@ -61,6 +61,7 @@ invalid key.
 | Endpoint | `https://users.rime.ai/v1/rime-tts` |
 | Audio format | `audio/wav` (requested via `Accept`) |
 | Transport | HTTPS request/response, **one request per clause**; audio returned to the browser over the app's own HTTP origin and played with `HTMLAudioElement` |
+| Region | **US West (us-west-2)**. `users.rime.ai` is Rime's documented default alias for `users-west`; `users-east` (us-east-1) is the alternative. Rime publishes US regions only |
 | Auth | `Authorization: Bearer <RIME_API_KEY>`, server-side only |
 | Request body | `{ text, speaker, modelId, lang }` — no undocumented parameters |
 
@@ -79,9 +80,22 @@ Configuration error: RIME_SPEAKER "celeste" is a coda voice and is not available
 on mistv3. Use a mistv3 English voice such as luna, or set RIME_MODEL=coda.
 ```
 
-`mistv3` was chosen over `coda` deliberately: it is Rime's lowest-latency model,
-and for an interruption-focused agent time-to-first-audio matters more than
-maximum fidelity.
+`mistv3` was chosen over `coda` deliberately. Rime's models page describes
+`mistv3` as optimised for "lowest time to first audio", quoting approximately
+37 ms P50 — **their figure, not ours**, and quoted here only as the basis for
+the choice. For an interruption-focused agent, time-to-first-audio matters more
+than maximum fidelity. The cost is language coverage: `mistv3` serves 4
+languages against coda's 9, which this project can afford because it ships
+English only.
+
+**Region and network honesty.** Rime publishes US regions only, so a demo
+recorded outside the US crosses an ocean before synthesis begins. Every
+server-side figure this project reports is wall-clock around one `fetch` and
+therefore *includes* that transit; none of them is a time-to-first-byte
+measurement, and none should be compared against Rime's own 37 ms P50, which is
+model latency. Choosing `users-east` would change the number for a reviewer on
+the US East coast and is a one-constant edit, but no such measurement is
+claimed here because none was taken.
 
 ### 4.1 Text preparation before synthesis
 
@@ -101,23 +115,96 @@ Applied rules, each from the official guidance:
 | Keep spoken sentences under 25 words | Prompting guide | long sentences are split at commas |
 | Never send SSML or inline tags | Prompting guide | any `<…>` tag is stripped |
 
-**`spell()` is deliberately not used.** It is Rime's one documented inline
-function, but the models page lists inline pronunciation control for `mistv2`
-and `coda` and **not** for `mistv3`, which this project ships. Sending an
-unsupported construct would be worse than reading a flight code plainly.
+**`spell()` is not used — and this was measured, not assumed.** An earlier
+version of this document claimed `spell()` was unavailable on `mistv3`. That was
+wrong, and the correction is recorded here rather than quietly edited away:
+Rime's models page lists `spell()` as supported on **both** `mistv3` and `coda`,
+while inline *phoneme* control is the separate feature restricted to Mist v2.
+The spell() page adds that "spell() is a Mist-family feature; Coda's pipeline
+does not process it", so the two pages disagree about coda — but agree that
+`mistv3`, which this project ships, has it.
 
-**MEASURED.** The real mock-tool reply now prepares to:
+So it was implemented, tested against the live API, and then removed. Section
+4.2 has the numbers.
+
+**MEASURED.** The real mock-tool reply, captured from a running server and put
+through `prepareForSpeech`:
 
 ```
-3 mock flights from Delhi to Mumbai. MOCK DATA from searchFlights - synthetic,
-not real information. IS486 Delhi to Mumbai departs 08:00 approx 3586 rupees.
-IS499 Delhi to Mumbai departs 15:00 approx 3897 rupees.
+3 mock flights from Delhi to Mumbai. IS486 Delhi to Mumbai departs 08:00
+approx 3586 rupees. IS499 Delhi to Mumbai departs 15:00 approx 3897 rupees.
+IS512 Delhi to Mumbai departs 10:00 approx 4208 rupees.
 ```
 
 Before this change the synthesiser would have been sent `- IS486  Delhi ->
 Mumbai  approx INR 3586`, i.e. "dash I S four eight six, Delhi hyphen
 greater-than Mumbai, approx I N R". Verified idempotent, and verified not to
 alter the semantic content of the reply.
+
+### 4.2 What is disclosed on screen rather than spoken
+
+An earlier build prefixed every tool reply with *"MOCK DATA from searchFlights —
+synthetic, not real information"* and answered ordinary questions by echoing the
+user's words back with a character count. Both were honest, and both were wrong
+for this product: they were **spoken aloud, in full, on every turn**, to a
+listener who cannot look at a screen. The disclaimer alone cost roughly four
+seconds before every answer, and it became the first clause — so it was also the
+first thing synthesised, delaying the useful audio.
+
+Disclosure now lives in the UI, in the activity timeline and in the README. The
+word "mock" remains in every tool summary, which is where a listener will
+actually hear it, and the first clause is now the answer:
+
+```
+clause 1 (first Rime request):  3 mock flights from Delhi to Mumbai.
+clause 2:                       IS486 Delhi to Mumbai departs 08:00 approx 3586 rupees.
+```
+
+**Rate units.** Hotel rows read `approx 3056 rupees/night`, and a bare slash is
+pronounced "slash". `speakSymbols` now rewrites a slash before a known rate unit
+as " per ", while leaving ordinary uses such as `and/or` alone. Both cases are
+covered by `npm run verify`.
+
+### 4.3 The `spell()` experiment — MEASURED, negative result
+
+The problem statement asks that a delivery claim be proved by holding model and
+voice constant, rendering at least two text variants, and explaining which
+wording changed the result. This is that test, and the result is negative.
+
+Flight codes like `IS486` are the kind of identifier a listener may need to
+write down, and `spell()` is documented as available on `mistv3`. The question
+was whether it does anything through the shipped HTTP path.
+
+**Method.** `mistv3` / `luna` / `eng` held constant. For each code, two variants
+were synthesised — `Flight <CODE> departs.` and `Flight spell(<CODE>) departs.`
+Duration was computed from the PCM payload (24 kHz, 16-bit mono, 44-byte
+header), not from the request time, so network variance does not enter.
+
+**The discriminator.** If `spell()` is processed, the extra duration must *grow
+with code length* — there are more characters to enunciate. If Rime is instead
+reading the literal word "spell", the delta stays roughly constant.
+
+| Code | plain | `spell()` | delta |
+|------|-------|-----------|-------|
+| `IS4` | 2.24 s | 2.24 s | +0.00 s |
+| `IS486` | 2.89 s | 3.15 s | +0.26 s |
+| `ABCD12345678` | 5.82 s | 5.70 s | **−0.12 s** |
+
+**Result: no evidence that `spell()` is processed on this path.** The delta does
+not grow with code length, and for the twelve-character code the `spell()` clip
+was *shorter* than the plain one — the opposite of what enunciating twelve
+characters would produce.
+
+**Decision: not shipped.** The implementation was written (it required exempting
+`spell()` from parenthetical flattening, and a lookbehind to stay idempotent)
+and then removed. If Rime does not process the construct, the most likely
+audible outcome is the word "spell" being read aloud before every flight code —
+a visible regression traded for a benefit that could not be demonstrated.
+
+**Limitation.** This measures duration, not intelligibility. It is possible that
+`spell()` is processed and simply produces audio of similar length; only
+listening would settle that. What can be said is that no measurable effect was
+found, and an unverified delivery claim is worth less than an honest negative.
 
 ## 5. Procedure
 
@@ -252,9 +339,17 @@ abandoned tool finished late and was refused.
 | A9 | **PASS** — second conversation started at its own generation 1, unaffected |
 | A10 | **PASS** — see 6.4 |
 
-A further proof for A4 uses the deterministic provider's own output: after the
-fenced turn, the next reply contains **no** "Earlier user turns" clause, which it
-would if the abandoned turn had entered history.
+A4 is proved from the server's own transcript, read back through
+`GET /api/conversations/:id/activity`: after the fenced turn it holds exactly
+**one** committed exchange, that exchange is the *new* question, and the
+abandoned question appears nowhere in it.
+
+This proof deliberately does not read the provider's reply text. An earlier
+version asserted that the reply lacked a particular phrase the mock emits —
+which tied a correctness proof to whichever provider happened to be configured,
+so switching to a real model would have silently destroyed the evidence. The
+transcript is what the conversation actually contains, so the proof holds for
+any provider.
 
 ### 6.3 Playback flushing — MEASURED (headless, stubbed audio element)
 

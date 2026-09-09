@@ -50,6 +50,14 @@ export interface LlmRequest {
 export interface LlmResult {
   /** The assistant's reply. */
   readonly message: string;
+  /**
+   * Set only when the provider declined the request on safety grounds.
+   *
+   * A refusal arrives as a successful response, not an error, so without this
+   * the route cannot tell a declined turn from an ordinary one. Recorded for
+   * observability; it does not change what commits.
+   */
+  readonly refusalCategory?: string;
 }
 
 export interface LlmProvider {

@@ -71,7 +71,7 @@ if (MODE === "unconfigured") {
     }),
   });
   const toolBody = (await tool.json()) as any;
-  check("mock tool still works", toolBody.message.includes("MOCK DATA"), true);
+  check("mock tool still works", /\bmock\b/i.test(toolBody.message), true);
 
   const interrupted = await fetch(`${BASE}/api/interrupt`, {
     method: "POST",

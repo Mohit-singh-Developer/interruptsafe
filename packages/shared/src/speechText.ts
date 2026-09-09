@@ -19,11 +19,13 @@
  * from the same committed source, and only the latter passes through here.
  *
  * Rime **does not support SSML**: its prompting guide says plainly not to send
- * `<break>`, `<emotion>` or other inline tags. Nothing here emits markup. The
- * one documented inline function, `spell()`, is also not used: the models page
- * lists inline pronunciation control for mistv2 and coda but not for mistv3,
- * which is the model this project ships, and sending an unsupported construct
- * would be worse than saying a flight code plainly.
+ * `<break>`, `<emotion>` or other inline tags. Nothing here emits markup.
+ *
+ * Its one documented inline function, `spell()`, is also not emitted - but for
+ * a measured reason rather than an assumed one. See the note above
+ * `linesToSentences`, and the A/B measurements in docs/RIME_EVIDENCE.md 4.2.
+ * (Inline *phoneme* control is a separate feature, documented as Mist v2 only;
+ * neither mistv3 nor coda offers it.)
  */
 
 /** Rime's guide: keep spoken sentences under 25 words to avoid breathlessness. */
@@ -39,6 +41,13 @@ function speakSymbols(text: string): string {
       .replace(/(\d)\s*-\s*(\d)/g, "$1 to $2")
       .replace(/&/g, " and ")
       .replace(/\s*\|\s*/g, ", ")
+      // Rates. Hotel rows read "approx 3056 rupees/night", and a synthesiser
+      // given a bare slash says "slash". Restricted to a known list of rate
+      // units so that ordinary uses like "and/or" are left alone.
+      .replace(
+        /\s*\/\s*(night|day|week|month|year|hour|hr|hrs|h|person|head|km|mile|kg|litre|liter|gallon)\b/gi,
+        " per $1",
+      )
   );
 }
 
@@ -86,6 +95,24 @@ function flattenAsides(text: string): string {
     return trimmed.length === 0 ? " " : `, ${trimmed}, `;
   });
 }
+
+/*
+ * `spell()` is deliberately NOT applied to flight codes here.
+ *
+ * Rime documents it as a Mist-family function, and this project ships mistv3,
+ * so it should be available. An implementation was written and then removed,
+ * because a live A/B could not show it doing anything: holding model and voice
+ * constant and rendering both variants, the delta between "Flight IS486
+ * departs." and "Flight spell(IS486) departs." did not grow with code length,
+ * and for a twelve-character code the spell() clip was marginally *shorter*.
+ * A processed spell() has to take longer - there are more characters to
+ * enunciate. The measurements are in docs/RIME_EVIDENCE.md section 4.2.
+ *
+ * Shipping it anyway carried a specific risk: if Rime does not process the
+ * construct, the most likely audible result is the literal word "spell" being
+ * read out before every flight code. That is not a trade worth making for a
+ * feature that could not be shown to work.
+ */
 
 /**
  * Turns line breaks into sentence boundaries.

@@ -759,6 +759,13 @@ export function App() {
               started. A reply that arrives after the user has moved on is shown
               struck through and never enters the transcript.
             </p>
+            <p className="disclosure">
+              ⚠️ Travel results are <strong>MOCK DATA</strong> — invented from a hash
+              of your words, never real flight, hotel or weather information.
+              Reasoning is a deterministic stub, not a language model. Shown here
+              rather than spoken, so the disclaimer does not cost the driver four
+              seconds on every reply.
+            </p>
           </div>
 
           <div className="conversation">

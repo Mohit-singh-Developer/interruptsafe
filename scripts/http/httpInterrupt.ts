@@ -29,6 +29,27 @@ async function chat(conversationId: string, message: string) {
   return { status: res.status, body: (await res.json()) as any };
 }
 
+/**
+ * Reads the server's transcript.
+ *
+ * Fencing is proved from this rather than from the reply text. Asserting on a
+ * provider's wording ties a correctness proof to whichever provider happens to
+ * be configured - switch to a real model and the proof evaporates. The
+ * transcript is what the conversation actually contains, so it holds for any
+ * provider.
+ */
+async function activity(conversationId: string) {
+  const res = await fetch(
+    `${BASE}/api/conversations/${encodeURIComponent(conversationId)}/activity`,
+  );
+  return { status: res.status, body: (await res.json()) as any };
+}
+
+/** The committed exchanges only, ignoring interruption markers. */
+function exchanges(body: any): Array<{ user: string; assistant: string; generation: number }> {
+  return (body.transcript ?? []).filter((entry: any) => entry.kind === "exchange");
+}
+
 async function interrupt(conversationId: string) {
   const res = await fetch(`${BASE}/api/interrupt`, {
     method: "POST",
@@ -74,36 +95,38 @@ check("result generation was 1", old.body.resultGeneration, 1);
 check("current generation is 2", old.body.currentGeneration, 2);
 check("no message field - it is not an active result", old.body.message, undefined);
 
-// 5/6. The fenced turn never entered history. If it had, the deterministic
-// provider would report "Earlier user turns in this conversation: 1".
+// 5/6. The fenced turn never entered history. Proved from the transcript the
+// server actually holds, not from anything the provider said.
 const fresh = await chat(A, "the NEW question");
 check("new turn succeeded", fresh.status, 200);
 check("status is ok", fresh.body.status, "ok");
 check("generation is 3", fresh.body.generation, 3);
+
+const afterFresh = exchanges((await activity(A)).body);
+check("PROOF: exactly one committed exchange, not two", afterFresh.length, 1);
 check(
-  "PROOF: history has no earlier turns, so the fenced turn never committed",
-  fresh.body.message.includes("Earlier user turns"),
+  "PROOF: and it is the NEW question, not the fenced one",
+  afterFresh[0]?.user,
+  "the NEW question",
+);
+check(
+  "PROOF: the fenced question appears nowhere in the transcript",
+  JSON.stringify(afterFresh).includes("the OLD question"),
   false,
 );
-check(
-  "the reply is about the NEW question",
-  fresh.body.message.includes("the NEW question"),
-  true,
-);
 
-// 7. A second normal turn now does see one earlier turn, proving history works.
+// 7. A second normal turn appends, proving history accumulates normally.
 const third = await chat(A, "a third question");
 check("third turn ok", third.status, 200);
-check(
-  "history now reports exactly ONE earlier turn (the new one, not the fenced one)",
-  third.body.message.includes("Earlier user turns in this conversation: 1"),
-  true,
-);
+
+const afterThird = exchanges((await activity(A)).body);
+check("history now holds exactly TWO exchanges", afterThird.length, 2);
+check("the fenced turn is still absent", JSON.stringify(afterThird).includes("the OLD question"), false);
 
 // 8. Conversation B is untouched by any of it.
 const bTurn = await chat(B, "unrelated");
 check("B starts at generation 1", bTurn.body.generation, 1);
-check("B has no earlier turns", bTurn.body.message.includes("Earlier user turns"), false);
+check("B has exactly one exchange of its own", exchanges((await activity(B)).body).length, 1);
 
 console.log("\n--- interrupt validation ---");
 const badInterrupt = await fetch(`${BASE}/api/interrupt`, {

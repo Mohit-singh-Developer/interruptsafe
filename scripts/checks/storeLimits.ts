@@ -1,6 +1,5 @@
 /**
- * Throwaway verification of ConversationStore limit behaviour.
- * Lives in the scratchpad, not the repo. The real test suite is Phase 14.
+ * Verification of ConversationStore limit and eviction behaviour.
  */
 const mod = await import(
   "../../packages/server/src/session/conversationState.ts"

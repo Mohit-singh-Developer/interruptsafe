@@ -198,6 +198,32 @@ code {
   color: var(--muted-invert);
 }
 
+/*
+ * Standing disclosure that the data and the reasoning are synthetic.
+ *
+ * It lives on screen rather than in the reply text because the reply text is
+ * spoken: a paragraph of disclaimer read aloud before every answer is the
+ * opposite of what a hands-busy driver needs. Visible to a reviewer, silent to
+ * the listener.
+ */
+.section-head .disclosure {
+  margin-top: 1rem;
+  padding: 0.7rem 1rem;
+  border: 1px dashed var(--line-invert);
+  border-radius: var(--radius-sm);
+  font-size: 0.78rem;
+  line-height: 1.55;
+  color: var(--muted-invert);
+  text-align: left;
+  max-width: 56ch;
+}
+
+.section-head .disclosure strong {
+  color: var(--signal-invert);
+  font-family: ui-monospace, "Cascadia Code", "Consolas", monospace;
+  font-size: 0.95em;
+}
+
 /* ---- Panels ---- */
 
 .panel--dark {

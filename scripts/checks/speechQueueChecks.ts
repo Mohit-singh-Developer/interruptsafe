@@ -91,7 +91,7 @@ console.log("--- clause chunker ---");
 
   // A realistic mock-tool reply.
   const reply =
-    '3 mock flights from Delhi to Mumbai. (MOCK DATA from searchFlights - synthetic, not real information.)\n- IS486 Delhi to Mumbai departs 08:00\n- IS499 Delhi to Mumbai departs 15:00';
+    '3 mock flights from Delhi to Mumbai (synthetic data). IS486 Delhi to Mumbai departs 08:00. IS499 Delhi to Mumbai departs 15:00.';
   const replyClauses = splitIntoClauses(reply);
   check("a tool reply chunks into several clauses", replyClauses.length >= 3, true);
   check("first clause is short enough to synthesise quickly", replyClauses[0].length <= 150, true);

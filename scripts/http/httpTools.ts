@@ -53,10 +53,22 @@ console.log("--- backward compatibility: a plain message still behaves as before
 {
   const plain = await chat(P, "Hello");
   check("plain chat returns 200", plain.status, 200);
+  // The mock is deterministic, so a greeting always produces the same reply -
+  // and that reply states the assistant's real scope instead of echoing.
   check(
-    "plain reply is the unchanged deterministic wording",
-    plain.body.message.startsWith('You said: "Hello" (1 word, 5 characters).'),
+    "a greeting gets a spoken-first reply, not an echo",
+    plain.body.message.startsWith("Hello."),
     true,
+  );
+  check(
+    "and it states what the assistant can actually do",
+    /hotels.*flights.*weather/i.test(plain.body.message),
+    true,
+  );
+  check(
+    "the reply never reads a disclaimer aloud",
+    /deterministic mock response|no language model was called/i.test(plain.body.message),
+    false,
   );
   const act = await activity(P);
   check(
@@ -70,8 +82,15 @@ console.log("\n--- a mock tool request completes and is committed ---");
 {
   const flights = await chat(T, "Find flights from Delhi to Mumbai");
   check("tool turn returns 200", flights.status, 200);
-  check("reply is labelled MOCK DATA", flights.body.message.includes("MOCK DATA"), true);
-  check("reply names the tool", flights.body.message.includes("searchFlights"), true);
+  // The data is disclosed as synthetic in the summary, which is short enough to
+  // be spoken. The tool NAME is deliberately not in the reply - "searchFlights"
+  // read aloud helps nobody; it is recorded in the activity events instead.
+  check("reply discloses the data is mock", /\bmock\b/i.test(flights.body.message), true);
+  check(
+    "reply does not read the tool identifier aloud",
+    flights.body.message.includes("searchFlights"),
+    false,
+  );
   check("reply mentions the parsed route", flights.body.message.includes("Delhi -> Mumbai"), true);
 
   const act = await activity(T);
@@ -87,15 +106,24 @@ console.log("\n--- a mock tool request completes and is committed ---");
   check("transcript holds the committed exchange", act.body.transcript.length, 1);
 
   // Determinism: the same question returns the same rows.
+  // Compare the whole reply. Slicing off a first line used to isolate the rows,
+  // but the reply is now a single spoken line - that comparison would have been
+  // empty against empty, passing without testing anything.
   const again = await chat(T, "Find flights from Delhi to Mumbai");
-  const firstRows = flights.body.message.split("\n").slice(1).join("\n");
-  const againRows = again.body.message.split("\n").slice(1).join("\n");
-  check("mock data is deterministic", againRows, firstRows);
+  check("mock data is deterministic", again.body.message, flights.body.message);
+  check("and the reply is not empty", flights.body.message.length > 20, true);
 
+  // Which tool ran is asserted from the activity events, not from the reply -
+  // the reply is spoken aloud and must not read out internal identifiers.
   const weather = await chat(T, "Check weather in Mumbai");
-  check("weather tool selected", weather.body.message.includes("checkWeather"), true);
+  check("weather reply mentions the forecast subject", /weather|forecast|Mumbai/i.test(weather.body.message), true);
+  const weatherEvents = (await activity(T)).body.events.map((e: any) => e.tool);
+  check("weather tool selected", weatherEvents.includes("checkWeather"), true);
+
   const hotels = await chat(T, "Find hotels in Goa");
-  check("hotel tool selected", hotels.body.message.includes("searchHotels"), true);
+  check("hotel reply mentions hotels", /hotel/i.test(hotels.body.message), true);
+  const hotelEvents = (await activity(T)).body.events.map((e: any) => e.tool);
+  check("hotel tool selected", hotelEvents.includes("searchHotels"), true);
 }
 
 console.log("\n--- THE CORE SCENARIO: interrupt while a mock tool is running ---");
@@ -149,10 +177,10 @@ console.log("\n--- THE CORE SCENARIO: interrupt while a mock tool is running ---
   const fresh = await chat(I, "Find hotels in Goa");
   check("new turn succeeds", fresh.status, 200);
   check("generation is 3", fresh.body.generation, 3);
-  check("new turn used its own tool", fresh.body.message.includes("searchHotels"), true);
+  check("new turn used its own tool", /\bhotels?\b/i.test(fresh.body.message), true);
   check(
-    "PROOF: the abandoned flight search never entered history",
-    fresh.body.message.includes("Earlier user turns"),
+    "PROOF: the abandoned flight search is not in the reply",
+    /flight/i.test(fresh.body.message),
     false,
   );
 

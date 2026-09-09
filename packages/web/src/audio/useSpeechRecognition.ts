@@ -139,7 +139,9 @@ export function useSpeechRecognition(
    */
   const restartsRef = useRef({ count: 0, windowStartedAt: 0 });
 
-  // Created once, not per render.
+  // The instance is created once, during render, because `supported` and the
+  // stable ref both depend on it. Its event handlers are NOT attached here -
+  // see the effect below for why.
   if (supported && recognitionRef.current === null) {
     const Recognition = getRecognitionConstructor()!;
     const recognition = new Recognition();
@@ -148,6 +150,47 @@ export function useSpeechRecognition(
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.maxAlternatives = 1;
+
+    recognitionRef.current = recognition;
+  }
+
+  const start = useCallback(() => {
+    const recognition = recognitionRef.current;
+    if (recognition === null) return;
+
+    wantListeningRef.current = true;
+    restartsRef.current = { count: 0, windowStartedAt: Date.now() };
+    setStatus("starting");
+    try {
+      recognition.start();
+    } catch {
+      // start() throws if it is already running, which is harmless here.
+    }
+  }, []);
+
+  const stop = useCallback(() => {
+    const recognition = recognitionRef.current;
+    wantListeningRef.current = false;
+    setInterim("");
+    recognition?.stop();
+    setStatus((current) => (current === "unsupported" ? current : "idle"));
+  }, []);
+
+  /**
+   * Attach the event handlers on mount; detach and abort on unmount.
+   *
+   * They are attached HERE rather than at construction because React StrictMode
+   * mounts, unmounts and remounts every component in development. The instance
+   * lives in a ref, so it survives that cycle - but the cleanup nulls its
+   * handlers, and construction never runs again. Attaching at construction
+   * therefore left recognition permanently deaf after the first StrictMode
+   * cycle: no results, no transcripts, and no tier-2 confirmation, in exactly
+   * the `npm run dev` mode the demo runs in. Attaching in an effect means the
+   * remount reattaches.
+   */
+  useEffect(() => {
+    const recognition = recognitionRef.current;
+    if (recognition === null) return;
 
     recognition.onstart = () => setStatus("listening");
 
@@ -225,37 +268,8 @@ export function useSpeechRecognition(
       setStatus((current) => (current === "denied" || current === "error" ? current : "idle"));
     };
 
-    recognitionRef.current = recognition;
-  }
-
-  const start = useCallback(() => {
-    const recognition = recognitionRef.current;
-    if (recognition === null) return;
-
-    wantListeningRef.current = true;
-    restartsRef.current = { count: 0, windowStartedAt: Date.now() };
-    setStatus("starting");
-    try {
-      recognition.start();
-    } catch {
-      // start() throws if it is already running, which is harmless here.
-    }
-  }, []);
-
-  const stop = useCallback(() => {
-    const recognition = recognitionRef.current;
-    wantListeningRef.current = false;
-    setInterim("");
-    recognition?.stop();
-    setStatus((current) => (current === "unsupported" ? current : "idle"));
-  }, []);
-
-  // Detach handlers and abort on unmount so nothing fires into a dead tree.
-  useEffect(() => {
-    const recognition = recognitionRef.current;
     return () => {
       wantListeningRef.current = false;
-      if (recognition === null) return;
       recognition.onresult = null;
       recognition.onerror = null;
       recognition.onend = null;

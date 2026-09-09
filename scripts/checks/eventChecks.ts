@@ -1,6 +1,5 @@
 /**
- * Throwaway verification of the event log and transcript model.
- * Lives in the scratchpad, NOT the repo.
+ * Verification of the event log and the transcript model.
  */
 const base = "../../packages/server/src/session";
 const cs = (await import(`${base}/conversationState.ts`)) as any;

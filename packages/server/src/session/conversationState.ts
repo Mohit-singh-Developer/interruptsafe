@@ -141,6 +141,28 @@ export class ConversationStore {
   }
 
   /**
+   * The generation owner and event log for a conversation that already exists,
+   * or undefined.
+   *
+   * Never creates, and never disturbs eviction order. `/api/tts` is a
+   * presentation endpoint: it must not be able to allocate conversation state
+   * for an arbitrary id, and it must not be able to evict a live conversation
+   * by naming one that does not exist. That is the same rule `activity` follows.
+   *
+   * It also removes a misleading failure. Reaching this through `generationFor`
+   * created a fresh conversation at generation 0, so speech for an evicted or
+   * post-restart conversation was judged stale and refused with 409 - the app
+   * fell silent and blamed an interruption that never happened.
+   */
+  existing(
+    id: string,
+  ): { generation: GenerationManager; events: ConversationEventLog } | undefined {
+    const conversation = this.conversations.get(id);
+    if (conversation === undefined) return undefined;
+    return { generation: conversation.generation, events: conversation.events };
+  }
+
+  /**
    * Appends a completed exchange.
    *
    * Both halves are written together so a failed or fenced reply can never

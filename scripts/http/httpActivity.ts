@@ -102,10 +102,15 @@ console.log("\n--- 11..12: a later generation commits normally ---");
 const fresh = await chat(A, "the NEW question");
 check("new turn succeeded", fresh.status, 200);
 check("generation is 3", fresh.body.generation, 3);
+// Proved from the transcript rather than the provider's wording, so the proof
+// survives swapping the provider for a real model.
+const freshTranscript = (await activity(A)).body.transcript ?? [];
+const freshExchanges = freshTranscript.filter((entry: any) => entry.kind === "exchange");
+check("PROOF: stale turn never entered the transcript", freshExchanges.length, 1);
 check(
-  "PROOF: stale turn never entered provider history",
-  fresh.body.message.includes("Earlier user turns"),
-  false,
+  "PROOF: the committed exchange is the new one",
+  freshExchanges[0]?.user,
+  "the NEW question",
 );
 
 const afterFresh = await activity(A);

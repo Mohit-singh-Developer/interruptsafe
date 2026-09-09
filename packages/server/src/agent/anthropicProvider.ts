@@ -3,11 +3,11 @@ import type { AnthropicConfig } from "../config";
 import type { LlmProvider, LlmRequest, LlmResult } from "./llmProvider";
 
 /**
- * REAL PROVIDER - Phase 3.
+ * REAL PROVIDER - the optional path, selected by `LLM_PROVIDER=anthropic`.
  *
- * Returns one complete response per call. No streaming and no tools; those
- * belong to later phases. Cancellation is forwarded to the SDK as an advisory
- * request - see `generate` below.
+ * Returns one complete response per call. There is no token streaming and no
+ * model-driven tool calling; both are documented limitations. Cancellation is
+ * forwarded to the SDK as an advisory request - see `generate` below.
  *
  * The Messages API is stateless, so the whole conversation supplied by
  * `ConversationState` is sent on every turn.
@@ -30,8 +30,8 @@ import type { LlmProvider, LlmRequest, LlmResult } from "./llmProvider";
 const MAX_TOKENS = 16000;
 
 /**
- * Replies are destined to be spoken by Rime in a later phase, so they are kept
- * short and free of markup that would read badly aloud.
+ * Replies are spoken aloud by Rime, so they are kept short and free of markup
+ * that would read badly. prepareForSpeech strips anything that slips through.
  */
 const SYSTEM_PROMPT =
   "You are InterruptSafe, a concise voice assistant. Reply in at most three " +
@@ -79,10 +79,14 @@ export function createAnthropicProvider(config: AnthropicConfig): LlmProvider {
 
       // A refusal arrives as a successful HTTP response, so it must be checked
       // before reading content - otherwise it looks like an empty reply.
+      // `stop_details` is populated only for a refusal and is null otherwise,
+      // so it is read defensively.
       if (response.stop_reason === "refusal") {
+        const category = response.stop_details?.category ?? "unspecified";
         return {
           message:
             "I can't help with that request. Please try asking something else.",
+          refusalCategory: category,
         };
       }
 

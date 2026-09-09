@@ -36,6 +36,12 @@ console.log("\n--- symbols are spoken as words ---");
   contains("arrow is not left as ->", prepareForSpeech("Delhi -> Mumbai"), "->", false);
   contains("unicode arrow handled", prepareForSpeech("Delhi → Mumbai"), " to ");
   contains("ampersand becomes 'and'", prepareForSpeech("bed & breakfast"), " and ");
+  // A bare slash is pronounced "slash", which is wrong for a rate.
+  contains("rate slash becomes 'per'", prepareForSpeech("3056 rupees/night"), "rupees per night");
+  contains("no slash is left in a rate", prepareForSpeech("3056 rupees/night"), "/", false);
+  contains("speed rates too", prepareForSpeech("110 km/h"), "km per h");
+  // But an ordinary slash between words is not a rate and must be left alone.
+  contains("and/or is not turned into a rate", prepareForSpeech("hotels and/or flights"), "and/or");
 }
 
 console.log("\n--- non-dollar currency is written out (official rule) ---");
@@ -72,8 +78,10 @@ console.log("\n--- sentence length is capped (Rime: under 25 words) ---");
 
 console.log("\n--- THE REAL CASE: an actual mock tool reply ---");
 {
+  // The shape the provider returns now: a summary that discloses the data is
+  // mock, then the rows. Parenthetical flattening is still exercised.
   const reply =
-    '3 mock flights from Delhi to Mumbai. (MOCK DATA from searchFlights - synthetic, not real information.)\n' +
+    '3 mock flights from Delhi to Mumbai (synthetic data).\n' +
     '- IS486  Delhi -> Mumbai  departs 08:00  approx INR 3586\n' +
     '- IS499  Delhi -> Mumbai  departs 15:00  approx INR 3897';
 
@@ -93,7 +101,7 @@ console.log("\n--- THE REAL CASE: an actual mock tool reply ---");
 console.log("\n--- idempotence: safe to apply on client AND server ---");
 {
   const reply =
-    '3 mock flights from Delhi to Mumbai. (MOCK DATA - synthetic.)\n- IS486 Delhi -> Mumbai approx INR 3586';
+    '3 mock flights from Delhi to Mumbai (synthetic).\n- IS486 Delhi -> Mumbai approx INR 3586';
   const once = prepareForSpeech(reply);
   const twice = prepareForSpeech(once);
   check("applying twice changes nothing", twice, once);
@@ -101,11 +109,11 @@ console.log("\n--- idempotence: safe to apply on client AND server ---");
 
 console.log("\n--- the semantic answer is not altered ---");
 {
-  const plain = 'You said: "Hello" (1 word, 5 characters). This is a deterministic mock response - no language model was called.';
+  const plain =
+    'I only handle hotels, flights and weather on this route, so I cannot answer that one.';
   const out = prepareForSpeech(plain);
-  contains("the quoted word survives", out, "Hello");
-  contains("the word count survives", out, "1 word");
-  contains("the disclaimer survives", out, "deterministic mock response");
+  contains("the scope statement survives", out, "hotels, flights and weather");
+  contains("the refusal survives", out, "cannot answer");
 }
 
 console.log(`\n${failures === 0 ? "ALL CHECKS PASSED" : `${failures} CHECK(S) FAILED`}`);

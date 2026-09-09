@@ -218,12 +218,15 @@ export function registerRoutes(
       // user has already moved past. This is a COST AND LATENCY OPTIMISATION,
       // not a correctness gate: the conversation was already settled by
       // `fencedCommit` before any text reached this endpoint.
+      // Read-only lookup: this endpoint must not be able to allocate a
+      // conversation, nor evict a live one, by naming an id that does not
+      // exist. An unknown id simply forgoes the optimisation and speaks.
       const { conversationId, generation } = validated;
-      const events =
-        conversationId === undefined ? undefined : conversations.eventsFor(conversationId);
+      const known = conversationId === undefined ? undefined : conversations.existing(conversationId);
+      const events = known?.events;
 
-      if (conversationId !== undefined && generation !== undefined) {
-        const generations = conversations.generationFor(conversationId);
+      if (known !== undefined && generation !== undefined) {
+        const generations = known.generation;
         if (generations.isStale(generation)) {
           request.log.info(
             { conversationId, resultGeneration: generation, currentGeneration: generations.now() },
@@ -576,7 +579,17 @@ export function registerRoutes(
         }
 
         request.log.info(
-          { conversationId, generation, provider: provider.name },
+          {
+            conversationId,
+            generation,
+            provider: provider.name,
+            // Present only when the provider declined on safety grounds. A
+            // refusal is a successful response, so without this it would be
+            // indistinguishable from an ordinary reply in the log.
+            ...(result.refusalCategory === undefined
+              ? {}
+              : { refusalCategory: result.refusalCategory }),
+          },
           "Result committed",
         );
         events.record(
@@ -615,7 +628,20 @@ export function registerRoutes(
 
         // Upstream failure (network, auth, rate limit). Details go to the log;
         // the client gets a generic message so nothing sensitive is echoed back.
-        request.log.error({ err: error }, "Provider failed to generate a reply");
+        //
+        // Only named fields are logged, never the raw error object. A provider
+        // SDK's error can carry arbitrary request and header material, and the
+        // README states plainly that the API key is never written to the logs -
+        // serialising whatever an SDK chose to attach would make that a claim
+        // this code could not actually keep.
+        request.log.error(
+          {
+            name: error instanceof Error ? error.name : "unknown",
+            reason: error instanceof Error ? error.message : "unknown",
+            stack: error instanceof Error ? error.stack : undefined,
+          },
+          "Provider failed to generate a reply",
+        );
         // Deliberately generic: provider internals stay in the server log.
         events.record(
           "provider-failed",
