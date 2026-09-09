@@ -69,6 +69,22 @@ async function pretendToWork(
   await delay(delayMs);
 }
 
+/**
+ * A result that asks for the missing detail instead of inventing one.
+ *
+ * These tools used to substitute a default place when none was parsed, so
+ * "find some flights" answered confidently about Delhi to Mumbai - a route the
+ * user never mentioned. For a product whose whole claim is that nothing the
+ * user did not ask for is ever spoken as current, quietly inventing the subject
+ * of the answer is the worst available failure. Asking is both honest and the
+ * behaviour the situation calls for: the driver can simply say the town.
+ *
+ * Empty rows are deliberate - there is nothing to list yet.
+ */
+function needMoreDetail(question: string): ToolResult {
+  return { summary: question, rows: [] };
+}
+
 export function createMockTravelTools(
   delayMs: number,
   mode: MockToolMode,
@@ -78,10 +94,17 @@ export function createMockTravelTools(
     description: "MOCK: returns invented flights between two cities.",
 
     async execute(input: ToolInput, signal: AbortSignal): Promise<ToolResult> {
+      // Asked BEFORE the artificial delay: there is nothing to look up, so
+      // there is nothing to wait for. Pausing three seconds and then asking
+      // which cities looks like a fault rather than a question.
+      if (input.from === undefined || input.to === undefined) {
+        return needMoreDetail("Which two cities are you flying between?");
+      }
+
       await pretendToWork(delayMs, mode, signal);
 
-      const from = titleCase(input.from ?? "Delhi");
-      const to = titleCase(input.to ?? "Mumbai");
+      const from = titleCase(input.from);
+      const to = titleCase(input.to);
       const seed = hashOf(`${from}->${to}`);
 
       const rows = [0, 1, 2].map((index) => {
@@ -103,9 +126,13 @@ export function createMockTravelTools(
     description: "MOCK: returns an invented forecast for a city.",
 
     async execute(input: ToolInput, signal: AbortSignal): Promise<ToolResult> {
+      if (input.city === undefined) {
+        return needMoreDetail("Which town should I check the weather for?");
+      }
+
       await pretendToWork(delayMs, mode, signal);
 
-      const city = titleCase(input.city ?? "Mumbai");
+      const city = titleCase(input.city);
       const seed = hashOf(city);
       const temperature = 18 + (seed % 17);
       const conditions = ["clear", "light rain", "overcast", "humid", "breezy"][seed % 5];
@@ -125,9 +152,13 @@ export function createMockTravelTools(
     description: "MOCK: returns invented hotels in a city.",
 
     async execute(input: ToolInput, signal: AbortSignal): Promise<ToolResult> {
+      if (input.city === undefined) {
+        return needMoreDetail("Which town should I look for hotels in?");
+      }
+
       await pretendToWork(delayMs, mode, signal);
 
-      const city = titleCase(input.city ?? "Goa");
+      const city = titleCase(input.city);
       const seed = hashOf(city);
       const names = ["Harbour View", "Old Fort Residency", "Palm Court"];
 

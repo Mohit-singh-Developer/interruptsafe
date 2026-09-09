@@ -25,9 +25,27 @@ export interface ToolIntent {
   readonly input: ToolInput;
 }
 
-const ROUTE_WITH_FROM = /from\s+([a-z][a-z\s]*?)\s+to\s+([a-z][a-z\s]*?)\s*(?:[.?!,]|$)/i;
-const ROUTE_BARE = /([a-z][a-z\s]*?)\s+to\s+([a-z][a-z\s]*?)\s*(?:[.?!,]|$)/i;
-const CITY = /\bin\s+([a-z][a-z\s]*?)\s*(?:[.?!,]|$)/i;
+/*
+ * Place patterns.
+ *
+ * A place is a run of consecutive letter-words, ending wherever the letters
+ * do - at punctuation, a digit, a symbol, or the end of the message. An earlier
+ * version instead *required* one of ".?!," or end-of-string to close the match,
+ * which meant anything else made the match fail completely rather than end
+ * early: "find hotels in Jaipur under 3000" extracted no city at all, and the
+ * assistant asked which town despite having just been told.
+ *
+ * That mattered most for the voice path, which is the point of the product.
+ * Speech recognition rarely supplies punctuation and readily appends
+ * qualifiers - prices, star ratings, times - so the required-terminator form
+ * failed on exactly the phrasing a person actually speaks.
+ *
+ * Trailing words that are not part of the name are trimmed by `clean` below.
+ */
+const PLACE = "[a-z]+(?:\\s+[a-z]+)*";
+const ROUTE_WITH_FROM = new RegExp(`from\\s+(${PLACE}?)\\s+to\\s+(${PLACE})`, "i");
+const ROUTE_BARE = new RegExp(`(${PLACE}?)\\s+to\\s+(${PLACE})`, "i");
+const CITY = new RegExp(`\\bin\\s+(${PLACE})`, "i");
 
 /**
  * Words that end a place name in ordinary speech.
@@ -71,6 +89,16 @@ const PLACE_STOP_WORDS = new Set([
   "by",
   "before",
   "after",
+  // Qualifiers a speaker appends after naming a place.
+  "under",
+  "over",
+  "below",
+  "above",
+  "within",
+  "cheaper",
+  "cheapest",
+  "costing",
+  "priced",
 ]);
 
 /**

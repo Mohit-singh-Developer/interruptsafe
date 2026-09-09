@@ -115,6 +115,31 @@ console.log("\n--- a keyword must be a request, not a mention ---");
   });
 }
 
+console.log("\n--- a place ends at the letters, not at punctuation ---");
+{
+  // REGRESSION. The place pattern used to *require* one of ".?!," or the end of
+  // the message to close the match, so anything else made it fail outright
+  // rather than end early - and the assistant asked which town immediately
+  // after being told. Speech recognition supplies no punctuation and readily
+  // appends qualifiers, so this failed on exactly the phrasing people speak.
+  intent("a digit after the city", "find hotels in Jaipur 5 star", "searchHotels", {
+    city: "Jaipur",
+  });
+  intent("a price qualifier", "find hotels in Jaipur under 3000", "searchHotels", {
+    city: "Jaipur",
+  });
+  intent("a semicolon", "find hotels in Jaipur; something else", "searchHotels", {
+    city: "Jaipur",
+  });
+  intent("a time after the destination", "find flights from Delhi to Mumbai 9am", "searchFlights", {
+    from: "Delhi",
+    to: "Mumbai",
+  });
+  intent("a duration after the city", "check the weather in Udaipur 2 days", "checkWeather", {
+    city: "Udaipur",
+  });
+}
+
 console.log("\n--- multi-word places still survive ---");
 {
   intent("a two-word city is kept whole", "Find hotels in New Delhi", "searchHotels", {

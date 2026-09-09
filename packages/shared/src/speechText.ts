@@ -23,7 +23,7 @@
  *
  * Its one documented inline function, `spell()`, is also not emitted - but for
  * a measured reason rather than an assumed one. See the note above
- * `linesToSentences`, and the A/B measurements in docs/RIME_EVIDENCE.md 4.2.
+ * `linesToSentences`, and the A/B measurements in docs/RIME_EVIDENCE.md 4.3.
  * (Inline *phoneme* control is a separate feature, documented as Mist v2 only;
  * neither mistv3 nor coda offers it.)
  */
@@ -106,7 +106,7 @@ function flattenAsides(text: string): string {
  * departs." and "Flight spell(IS486) departs." did not grow with code length,
  * and for a twelve-character code the spell() clip was marginally *shorter*.
  * A processed spell() has to take longer - there are more characters to
- * enunciate. The measurements are in docs/RIME_EVIDENCE.md section 4.2.
+ * enunciate. The measurements are in docs/RIME_EVIDENCE.md section 4.3.
  *
  * Shipping it anyway carried a specific risk: if Rime does not process the
  * construct, the most likely audible result is the literal word "spell" being

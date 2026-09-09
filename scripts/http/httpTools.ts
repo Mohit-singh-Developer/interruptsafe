@@ -78,6 +78,31 @@ console.log("--- backward compatibility: a plain message still behaves as before
   );
 }
 
+console.log("\n--- a tool asks for a missing detail instead of inventing one ---");
+{
+  // REGRESSION, seen in a real browser session: "find some flights" named no
+  // route, and the tool substituted Delhi to Mumbai - so the assistant spoke
+  // confidently about a journey the user had never mentioned. For a product
+  // whose claim is that nothing unasked-for is ever spoken as current, that is
+  // the worst available failure mode.
+  const vague = await chat(`V-${Date.now()}`, "okay find some flights");
+  check("vague request returns 200", vague.status, 200);
+  check(
+    "it asks which cities, rather than answering",
+    /which two cities/i.test(vague.body.message),
+    true,
+  );
+  check(
+    "and it invents no route",
+    /delhi|mumbai/i.test(vague.body.message),
+    false,
+  );
+
+  const noCity = await chat(`H-${Date.now()}`, "find some hotels");
+  check("it asks which town", /which town/i.test(noCity.body.message), true);
+  check("and names no city", /goa/i.test(noCity.body.message), false);
+}
+
 console.log("\n--- a mock tool request completes and is committed ---");
 {
   const flights = await chat(T, "Find flights from Delhi to Mumbai");

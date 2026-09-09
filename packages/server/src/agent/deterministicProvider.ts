@@ -109,7 +109,12 @@ export function createDeterministicProvider(delayMs = 0): LlmProvider {
       // synthetic in the one place a listener will actually hear it.
       if (request.toolContext !== undefined) {
         const { summary, rows } = request.toolContext;
-        return { message: `${summary}. ${rows.join(". ")}` };
+        // A tool with no rows is asking for a missing detail rather than
+        // reporting a result, so the summary stands alone - appending an empty
+        // join would leave a trailing full stop hanging in the spoken output.
+        return {
+          message: rows.length === 0 ? summary : `${summary}. ${rows.join(". ")}`,
+        };
       }
 
       const latest = request.messages.at(-1);

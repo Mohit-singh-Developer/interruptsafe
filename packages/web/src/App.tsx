@@ -100,12 +100,21 @@ const MIC_LABELS: Record<string, string> = {
   error: "Mic error — retry",
 };
 
-/** Longer explanations, shown as tooltips and to screen readers. */
+/**
+ * Longer explanations, shown as tooltips and to screen readers.
+ *
+ * These are worded carefully. An earlier version claimed "audio never leaves
+ * this tab" and "nothing is transcribed", both of which stopped being true once
+ * browser speech recognition was added: the recogniser does transcribe, and
+ * Chrome and Edge have historically sent audio to a remote service. What this
+ * application can honestly promise is that *it* never receives the audio - the
+ * browser hands it text - so that is what these say.
+ */
 const MIC_TITLES: Record<string, string> = {
-  idle: "Start local microphone listening. Audio never leaves this tab.",
+  idle: "Start listening. This app never receives your audio; the browser passes it only text.",
   starting: "Requesting microphone access…",
   listening:
-    "Listening locally for speech activity. Speaking while a turn is in flight will interrupt it. Nothing is transcribed.",
+    "Listening. Loudness is measured locally; recognised words become your next message. Speaking while a turn is in flight will interrupt it.",
   denied: "Microphone permission was denied. Allow it in your browser settings.",
   unavailable: "No microphone is available in this browser or device.",
   error: "The microphone could not be started. Click to try again.",
