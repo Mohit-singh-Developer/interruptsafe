@@ -84,11 +84,13 @@ export interface Config {
    */
   readonly mockToolMode: MockToolMode;
   /**
-   * Rime text-to-speech, when configured.
+   * Rime text-to-speech - the primary spoken output.
    *
-   * OPTIONAL by design. Absent means voice output is unavailable and the app
-   * runs exactly as before - text chat, mock tools, generation fencing and
-   * interruption are all unaffected. Nothing here is ever sent to the browser.
+   * Optional to CONFIGURE, not incidental to the product: without audio there
+   * is nothing for the user to talk over, so the intended path has it set.
+   * Absent is a disclosed degraded mode - text chat, mock tools, generation
+   * fencing and interruption keep working, and the UI and /api/health both say
+   * plainly that nothing is speaking. Nothing here is ever sent to the browser.
    */
   readonly rime?: RimeConfig;
 }
@@ -172,8 +174,10 @@ function readMockToolMode(): MockToolMode {
 /**
  * Reads Rime settings, or returns undefined when no key is configured.
  *
- * Deliberately not an error. Text-to-speech is a presentation feature; the
- * project must start and demo fully without any credential at all.
+ * Deliberately not a startup error. Synthesis is applied to a reply that has
+ * already been committed, so a missing credential costs audio and never
+ * correctness - which means the correctness core can be developed and tested
+ * at zero cost. It is a degraded mode all the same, and it is reported as one.
  *
  * Default model is `mistv3`, Rime's lowest-latency model - the right trade for
  * an interruption-focused voice agent, where time-to-first-audio matters more

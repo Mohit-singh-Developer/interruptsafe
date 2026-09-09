@@ -4,9 +4,39 @@ A full-duplex voice agent that never continues an outdated conversation: when th
 user interrupts, playback stops, the conversation advances to a new generation,
 and results from the superseded generation can no longer re-enter it.
 
-## Current development status
+## Who this is for
 
-**Interruption correctness core - implemented.**
+**A driver, mid-journey, with both hands on the wheel and both eyes on the road.**
+
+They are three hours into a long drive and want somewhere to stop tonight, so
+they ask out loud. While the assistant is still looking, they change their mind
+— they passed a sign, the light is going, or they simply reconsidered — and they
+say so *over the top of* the reply, because that is how people actually talk.
+
+They cannot pick up the phone to correct it. They cannot glance down a list. A
+screen is unsafe at speed and illegal in most places. **Voice is not a
+convenience for this user; it is the only channel available.** Remove speech and
+there is no product left — not a worse product, no product.
+
+### The failure that matters
+
+A naive agent keeps talking for another second and then answers the question the
+driver has already abandoned. Or worse: the lookup for the *old* destination
+returns late and quietly becomes the answer.
+
+The driver cannot catch either mistake. They never saw a screen, so the only
+thing they know about the conversation is **what they heard**. If what they hear
+is stale, they act on it, and they take the wrong exit.
+
+So the requirement is not "interrupt quickly". It is:
+
+> Nothing the driver did not ask for may ever be spoken as current.
+
+InterruptSafe makes that structural rather than probable. Stopping the audio is
+the part the driver notices; refusing to let the abandoned work commit is the
+part that keeps them from acting on a stale answer.
+
+## What works today
 
 You can type a message and get a reply. The reply comes either from a
 **deterministic mock** (the default, requiring no API key and making no network
@@ -22,28 +52,21 @@ where a provider supports it, but nothing depends on it succeeding.
 
 The full voice path works too: speak, see the recognised text, have it answered,
 and interrupt by talking over the reply. Speech recognition is browser-native
-and free; Rime speech output is **optional** and the app is fully usable without
-it. There is no streaming and no model-driven tool calling yet.
+and free. **Rime is the primary spoken output and the path the demo runs on** —
+there is no second synthesiser and no fallback voice. Running without a Rime
+credential is a supported *degraded* mode, described under
+[Known limitations](#known-limitations), not the intended one: it exercises the
+text half of the product only.
+
+Why speech is load-bearing rather than decorative: the product exists to be
+talked over. Remove the audio and tier-1 interruption has nothing to stop, two
+of the ten acceptance criteria become untestable, and what is left is a chat box.
 
 **Rime is verified against the live API.** The shipped `mistv3` / `luna` / `eng`
 configuration returns real WAVE speech through the full committed-reply path;
 measurements, failure modes and a playable sample clip are in
 [docs/RIME_EVIDENCE.md](docs/RIME_EVIDENCE.md) and
 `docs/evidence/rime-mistv3-luna-hello.wav`.
-
-| Phase | Status |
-|-------|--------|
-| 0 - Project planning and architecture | Complete |
-| 1 - Frontend and backend structure | Complete |
-| 2 - Basic text conversation flow | Complete |
-| 3 - Real LLM provider and conversation state | Complete |
-| 4 - Generation versioning | Complete |
-| 5 - Mock long-running tools | Complete |
-| 6 - Stale-result fencing | Complete |
-| 7 - Deterministic interruption | Complete |
-| 8 - Microphone, local VAD, browser speech-to-text | Complete (browser-native STT, not Deepgram) |
-| 9 - Rime speech output | Complete — **optional**, app runs fully without it |
-| 10-16 | Not started |
 
 ## API
 
@@ -53,7 +76,7 @@ measurements, failure modes and a playable sample clip are in
 | `POST /api/chat` | One turn of a conversation |
 | `POST /api/interrupt` | Advance the generation, superseding outstanding work |
 | `GET /api/conversations/:conversationId/activity` | Lifecycle events and the reader's transcript |
-| `POST /api/tts` | Optional Rime speech synthesis; `503` when not configured |
+| `POST /api/tts` | Rime speech synthesis for a committed reply; `503` when no credential is configured |
 
 ```
 POST /api/chat
@@ -161,14 +184,19 @@ presented as genuine.
 Selection is **deterministic keyword matching**, not model-driven tool calling —
 so the whole tool demonstration runs with no API key and no network. Hotels are
 checked before weather, so "hotels in Goa with good weather" resolves to the
-hotel search. Any other message is an ordinary chat turn and behaves exactly as
-it did before.
+hotel search. Any other message is answered directly by the provider, with no
+tool involved.
 
 ```
+Find hotels in Jaipur
+What is the weather in Jaipur
 Find flights from Delhi to Mumbai
-Check weather in Mumbai
-Find hotels in Goa
 ```
+
+**Phrasing note.** The city is read to the end of the phrase or to the next
+punctuation mark, so `hotels in Udaipur` parses as `Udaipur` but
+`hotels in Udaipur instead` parses as `Udaipur instead`. End the sentence on the
+place name, or put a comma after it.
 
 A tool never touches conversation state. It returns a value, and
 `packages/server/src/tools/dispatch.ts` decides whether that value is still
@@ -243,7 +271,8 @@ variables for them.
 | Model ID | `mistv3` |
 | Speaker | `luna` |
 | Language | `eng` |
-| Endpoint | `https://users.rime.ai/v1/rime-tts` |
+| Endpoint | `https://users.rime.ai/v1/rime-tts` (hard-coded constant; the browser cannot influence it) |
+| Region | Rime default global host `users.rime.ai`. **No regional endpoint is selected**, and none is configurable |
 | Audio format | `audio/wav` (requested via `Accept`) |
 | Transport | HTTPS request/response, **one request per clause**; audio reaches the browser over the app's own origin and plays via `HTMLAudioElement` |
 | Request body | `{ text, speaker, modelId, lang }` — no undocumented parameters |
@@ -268,16 +297,22 @@ rejects that pairing at startup rather than failing on the first spoken turn.
 The live configuration is visible in the UI's **Speech provider** panel and at
 `GET /api/health`, so a reviewer never has to guess which provider is speaking.
 
+**The key never reaches the browser.** Set `RIME_API_KEY` in `.env` to enable
+speech. Synthesis goes browser → `POST /api/tts` → server → Rime. The client
+sends only text: it cannot choose a voice, a model, or a URL, because the Rime
+endpoint is a constant inside the server's client. The key is never logged.
+
 ### Third-party services
 
 | Service | Required? | Used for | If absent |
 |---------|-----------|----------|-----------|
-| Rime | **No** | All spoken output | Provider shows `None`; text mode works fully |
-| Anthropic | **No** | Optional real LLM | Deterministic mock provider is the default |
+| [Rime](https://docs.rime.ai) | **Yes, for the voice path** | All spoken output — the only synthesiser | Provider shows `None`; the app degrades to text and says so |
+| Anthropic | No | Optional real LLM | Deterministic mock provider is the default |
 | Browser Web Speech API | No | Speech recognition | UI says unsupported; typing still works |
-| Deepgram | **Not used** | — | — |
 
-Nothing else is contacted. Mock travel tools make no network calls.
+There is **no speech-to-text service**: recognition is the browser's own Web Speech
+API, so no STT credential, account or SDK exists in this project. Nothing else
+is contacted, and the mock travel tools make no network calls.
 
 ### Failure behaviour
 
@@ -294,38 +329,66 @@ Nothing else is contacted. Mock travel tools make no network calls.
 | Provider/tool fails | `502`; nothing is appended — no dangling turn |
 
 In every case the conversation transcript stays correct: speech is a
-presentation layer applied *after* a reply has been committed.
+presentation layer applied *after* a reply has been committed. Playback stops
+instantly when you interrupt, but nothing waits on that: the generation bump is
+what makes old work obsolete.
 
-### Speech output (Rime) — optional
+## Known limitations
 
-Assistant replies can be spoken aloud with [Rime](https://docs.rime.ai). This is
-the **only** text-to-speech path in the project; there is no fallback
-synthesiser. It is also **entirely optional**.
+Stated plainly, because a reviewer will hit these.
 
-With no `RIME_API_KEY`:
+**Voice output**
 
-- the server starts normally and logs that voice output is disabled;
-- `GET /api/health` reports `ttsAvailable: false`;
-- `POST /api/tts` answers `503` with a clear message;
-- the UI shows **⚠️ Voice output unavailable**;
-- text chat, mock tools, generation fencing and interruption are **unaffected**.
+1. **Without `RIME_API_KEY` the app is silent.** Everything else works, and the
+   UI and `/api/health` both say so, but nothing is spoken. That is a degraded
+   mode, not the intended one — the interruption-of-audio behaviour cannot be
+   observed in it.
+2. **No streaming synthesis.** Rime documents HTTP and WebSocket streaming;
+   this build sends one HTTP request per clause. Clause chunking recovers most
+   of the time-to-first-audio benefit without an unverified protocol
+   implementation.
+3. **English only.** `lang` is fixed to `eng`. No multilingual or
+   code-switched routing is attempted.
+4. **`spell()` is not used.** Rime lists inline pronunciation control for
+   `mistv2` and `coda`, not for the `mistv3` this project ships, so flight
+   codes are read plainly rather than spelled.
+5. **Nobody has listened to the audio in a formal review yet.** Synthesis is
+   verified to return genuine non-silent WAVE speech of the right duration
+   through the full shipped path, and a playable clip is committed at
+   `docs/evidence/rime-mistv3-luna-hello.wav`. Intelligibility and clause
+   pacing need a human ear — see
+   [docs/RIME_EVIDENCE.md](docs/RIME_EVIDENCE.md) §8.
 
-Nothing about development or the core demo requires paying for anything.
+**Listening**
 
-To enable it, set `RIME_API_KEY` in `.env`. `RIME_SPEAKER` defaults to
-`celeste` and `RIME_MODEL` to `mistv3` (Rime's lowest-latency model); `coda` is
-the higher-quality alternative.
+6. **Voice activity detection is an energy threshold**, not production-grade
+   VAD. It cannot tell speech from a door slam — which is exactly why tier 2
+   confirmation exists before the generation advances.
+7. **Browser speech recognition is not guaranteed to run on-device.** Chrome
+   and Edge have historically used a remote Google service. This application
+   never receives or uploads your audio, but no privacy claim about the
+   *browser* is made. Firefox does not implement the API; the UI says so.
+8. **Echo.** With speakers at volume the agent can hear itself and interrupt
+   its own reply. Echo cancellation is requested on the microphone; headphones
+   are recommended for the demo.
+9. **Recognition quality is the browser’s.** Accents, noise and domain words
+   are outside this project’s control.
 
-**The key never reaches the browser.** Synthesis goes browser → `POST /api/tts`
-→ server → Rime. The client sends only text: it cannot choose a voice, a model,
-or a URL, because the Rime endpoint is a constant inside the server's client.
-The key is never logged.
+**Application**
 
-**A speech failure is a presentation failure.** Audio is synthesised from a reply
-that has *already* been committed through `fencedCommit`. If Rime is slow, down,
-or unconfigured, the text stays exactly where it is — only the sound is missing.
-Playback stops instantly when you interrupt, but nothing waits on that: the
-generation bump is what makes old work obsolete.
+10. **In-memory state only.** History, generations and events live in the
+    server process and are lost on restart. There is no database and no
+    horizontal scaling: generation state is per-process, so a second instance
+    would not share it.
+11. **Tool selection is deterministic keyword matching**, not model-driven tool
+    calling. This keeps the whole tool demonstration free and offline, but it
+    is not how a production agent would choose a tool.
+12. **The travel tools are mocks.** They return synthetic data derived from a
+    hash of the input — never real flight, hotel or weather information.
+13. **No token streaming.** A reply is committed whole, then spoken.
+14. **Interruption is bounded by recognition latency.** Tier 1 stops audio on
+    loudness within milliseconds, but the generation only advances once words
+    are recognised, or after the 1200 ms confirmation window expires.
 
 ## Demonstrating it
 
@@ -396,7 +459,7 @@ generation 1
                                result belonged to generation 1 while the
                                conversation is at 2. Discarded.
 generation 3
-• Mock tool completed          searchHotels
+• Mock tool completed          searchFlights
 • Result committed
 ```
 
@@ -413,20 +476,29 @@ Same demonstration, triggered by speaking instead of clicking:
 DEV_MOCK_TOOL_DELAY_MS=3000 DEV_MOCK_TOOL_MODE=stubborn npm run dev
 ```
 
-1. Send `Find flights from Delhi to Mumbai`. The mock tool starts.
-2. Press **Start listening** and allow microphone access.
-3. Say anything at all — the words are irrelevant and are not transcribed.
-4. Local voice activity is detected and the interrupt is requested.
-5. The generation advances; the stubborn tool ignores the cancellation.
-6. The tool finishes late and its result is **fenced, not committed**.
+This is the driver's situation end to end: a stop is being looked up, the driver
+changes their mind out loud, and the abandoned lookup must never be spoken.
 
-The chat shows a notice stating plainly that loudness was detected locally and
-nothing was transcribed. The activity panel shows only what the server actually
-knows: that an interruption was requested. It does **not** claim the server heard
-anything, because it did not.
+1. Press **Start listening** and allow microphone access.
+2. Say `Find hotels in Jaipur`. The transcript appears and the mock tool starts
+   — this is the lookup the driver is about to abandon.
+3. While it is still running, talk straight over the reply:
+   `Actually, make it hotels in Udaipur.`
+4. Audio stops the instant you speak. That is tier 1 — **loudness only** — and
+   the conversation has deliberately **not** changed yet.
+5. Recognition confirms the noise was speech, and only now does the generation
+   advance. That is tier 2.
+6. The stubborn Jaipur lookup ignores the cancellation and finishes anyway. Its
+   result is **fenced, not committed** — the driver never hears Jaipur again.
+7. The new words become the next turn, and Udaipur is what gets answered.
 
-This delay is a development aid only. It has no effect on the real provider and
-is not part of the correctness model.
+Step 6 is the whole product. The Jaipur result was correct, complete and free of
+errors; it was simply no longer what the driver asked for, so it was refused.
+
+The chat states plainly which of the two stages happened, so a loud noise that
+is never confirmed as speech is visibly *not* treated as an interruption. The
+activity panel shows only what the server actually knows — that an interruption
+was requested — and never claims the server heard anything, because it did not.
 
 ## Choosing a provider
 
@@ -476,7 +548,7 @@ its own, so you cannot mistake fake replies for real ones.
 | `DEV_MOCK_TOOL_DELAY_MS` | no | `0` | Development aid: artificial MOCK tool latency |
 | `DEV_MOCK_TOOL_MODE` | no | `cooperative` | `cooperative` or `stubborn` — how MOCK tools react to cancellation |
 | `RIME_API_KEY` | **no** | – | Enables speech output. Without it the app runs fully in text mode |
-| `RIME_SPEAKER` | no | `celeste` | Rime voice |
+| `RIME_SPEAKER` | no | `luna` | Rime voice (must be served by `RIME_MODEL`) |
 | `RIME_MODEL` | no | `mistv3` | `mistv3` (low latency) or `coda` (quality) |
 
 Real environment variables take precedence over values in `.env`, so you can
@@ -491,9 +563,9 @@ and the API key is never written to the logs.
 
 ## Architecture
 
-The approved design, the conversation-versioning model, the cancellation and
-stale-result fencing strategy, the scope split between core MVP and future work,
-and the full phase plan are documented in:
+The conversation-versioning model, the cancellation and stale-result fencing
+strategy, the scope split between core MVP and future work, and a record of how
+the work was sequenced are documented in:
 
 **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**
 
@@ -508,9 +580,29 @@ and the full phase plan are documented in:
 npm install
 ```
 
-No API keys are needed at this phase. Environment variables are documented in
-[.env.example](.env.example); `PORT` and `LOG_LEVEL` are read from the
-environment if set, and otherwise fall back to `8787` and `info`.
+Then configure the voice path, which is what the demo runs on:
+
+```
+cp .env.example .env
+```
+
+Set `RIME_API_KEY` in `.env` and check it:
+
+```
+npm run preflight:rime
+```
+
+That confirms the credential is not committed anywhere, that `mistv3`/`luna`/
+`eng` exists in Rime’s **live** catalogue, and that one real synthesis returns
+non-silent audio.
+
+The LLM needs no key — the deterministic provider is the default. Every
+variable is documented in [.env.example](.env.example); `PORT` and `LOG_LEVEL`
+fall back to `8787` and `info`.
+
+The app also starts with **no** `.env` at all. That runs the text-only degraded
+mode described under [Known limitations](#known-limitations) — useful for
+working on the correctness core at zero cost, but nothing is spoken.
 
 ## Running
 
@@ -544,13 +636,13 @@ rather than `127.0.0.1:5173`.
 ```
 npm run typecheck        # type-check every workspace
 npm run build            # production build of the web client
-npm run verify           # 7 correctness suites - offline, no key, no server
+npm run verify           # 8 correctness suites - offline, no key, no server
 npm run preflight:rime   # Rime config + secret hygiene checks
 ```
 
 `npm run verify` covers generation fencing, conversation state, the event log,
-voice activity detection, the generation-stamped playback queue, and speech text
-preparation. It needs no credential and no network, and exits non-zero on
+voice activity detection, the generation-stamped playback queue, speech text
+preparation, and tool intent parsing. It needs no credential and no network, and exits non-zero on
 failure.
 
 `npm run preflight:rime` confirms `.env` is gitignored and untracked, that
@@ -560,8 +652,17 @@ Rime's live catalogue. With a credential present it also performs one real
 synthesis and verifies the audio is not silence. Without one it skips that step
 cleanly.
 
-The HTTP suites need a running server — see
-[docs/RIME_EVIDENCE.md](docs/RIME_EVIDENCE.md) §5.
+The HTTP suites need a running server, started with both development delays —
+without them a turn finishes before it can be interrupted and the suites fail
+for the wrong reason:
+
+```
+DEV_DETERMINISTIC_DELAY_MS=1500 DEV_MOCK_TOOL_DELAY_MS=1500 DEV_MOCK_TOOL_MODE=stubborn npm run dev:server
+```
+
+Then `npm run verify:http`, plus `httpInterrupt` and `httpActivity`. Full
+instructions, including the two suites that need their own server
+configuration, are in [docs/RIME_EVIDENCE.md](docs/RIME_EVIDENCE.md) §5.
 
 ## Workspace layout
 

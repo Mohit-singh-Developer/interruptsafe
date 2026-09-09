@@ -1,8 +1,23 @@
 # InterruptSafe - Architecture
 
-**Status:** Approved (Phase 0). This document describes the intended design.
-Except where a section is explicitly marked as implemented, everything here is a
-**plan**, not working code.
+**Status: as-built, with two exceptions noted below.** This document began as the
+design approved before implementation. The correctness core it describes —
+generation versioning, stale-result fencing, two-stage interruption, the mock
+tool path and the Rime integration — is built and running; read it as a
+description of the shipped system.
+
+Two parts were designed here and **deliberately not built**. They are marked
+where they appear, and are listed once here so nothing in this document can be
+mistaken for a claim about the code:
+
+| Section | Status |
+|---------|--------|
+| §11.2 WebSocket transport with binary generation-stamped audio frames | **NOT BUILT.** The shipped transport is plain HTTP throughout — see §11.1. Clause-chunked HTTP synthesis gave enough of the latency benefit that the protocol was not needed to prove the claim. |
+| §13 phase plan, "Phase 8 · + Deepgram" | **NOT BUILT and not used.** Speech recognition is the browser's own Web Speech API. There is no speech-to-text credential, service or SDK in this project. |
+
+Everything else describes code you can read in this repository. Where this
+document and the code disagree, the code is correct — and please open the
+mismatch as a defect.
 
 ---
 
@@ -73,12 +88,12 @@ TypeScript end to end, in an npm workspaces monorepo.
 
 | Layer | Choice |
 |-------|--------|
-| Backend | Node.js 22 + TypeScript, `fastify` for HTTP; `ws` added at Phase 8 for real-time transport |
+| Backend | Node.js 22 + TypeScript, `fastify` for HTTP. Plain request/response only — no WebSocket dependency is installed (see §11.2) |
 | Frontend | React + Vite + TypeScript, Web Audio API |
 | Shared | `packages/shared` - wire protocol and generation types, zero dependencies |
 | LLM | Anthropic SDK behind an `LlmProvider` interface (section 10) |
 | TTS | **Rime - primary and only**; there is no fallback TTS in this codebase |
-| STT | Browser-native Web Speech API - zero cost, no key. Deepgram remains an unused option |
+| STT | Browser-native Web Speech API - zero cost, no key, no SDK. No third-party STT service is used |
 | Package manager | npm workspaces (npm 10+, no pnpm dependency) |
 
 **Why TypeScript on both sides.** Every cancellable operation in this system -
@@ -325,7 +340,7 @@ audio is playing; ignore VAD for a short window after playback begins.
 **Tier 3 ships first, in Phase 7, and needs no microphone.** It is also the tier
 the automated tests drive, because it is deterministic.
 
-### 8.1 Interruption over HTTP (Phases 1 to 7)
+### 8.1 Interruption over HTTP — as built
 
 Before any WebSocket exists, an interruption is simply a separate HTTP request to
 a dedicated interruption endpoint. What that endpoint does - and what it
@@ -441,7 +456,7 @@ The agent loop must not be coupled to one vendor or one model. The abstraction i
 introduced in its simplest useful form and grows only when a phase genuinely
 requires more, rather than being built speculatively against a future need.
 
-### 10.1 Phase 2 - request and response
+### 10.1 The interface: request and response
 
 The provider starts as a plain asynchronous call. There is no streaming and no
 cancellation, because nothing at this phase consumes either.
@@ -547,7 +562,7 @@ adaptive thinking left on is both cheaper and safer.
 The transport is introduced in two stages. Real-time transport is deliberately
 deferred until the data being carried is actually continuous.
 
-### 11.1 Phases 1 to 7 - plain HTTP
+### 11.1 Plain HTTP — as built, and what shipped
 
 The text-only phases need nothing more than request and response. The browser
 talks to the Vite dev server, which proxies `/api/*` to the backend, so there is
@@ -562,9 +577,18 @@ Interruption works over plain HTTP as a request to a separate endpoint. Section
 8.1 sets out exactly what that guarantees and, importantly, what it does not:
 aborting a client request never cancels server-side work.
 
-### 11.2 Phase 8 onward - one WebSocket per session
+### 11.2 One WebSocket per session — DESIGNED, NOT BUILT
 
-Real-time transport arrives at the point where it is genuinely required:
+> **This section describes a design that was not implemented.** The shipped
+> transport is the plain HTTP of §11.1, for every route including synthesis.
+> Clause-chunked HTTP delivered enough of the time-to-first-audio benefit that
+> a custom binary protocol was not needed to prove the interruption claim, and
+> an unimplemented protocol is worth less than a verified simple one. It is kept
+> here because the generation-stamped frame header below is the natural
+> extension of the fencing model to a streaming transport, and it records why
+> the client would still not need to trust the server to stop in time.
+
+Real-time transport would arrive at the point where it is genuinely required:
 microphone audio streaming to the server for speech-to-text, and synthesized
 audio streaming back for playback. WebRTC is not used - its signalling setup
 costs significant time and buys nothing for a local demo.
@@ -625,7 +649,12 @@ time - this is defence in depth for guarantee 2.
 
 ## 13. Phase plan and commit points
 
-Each phase ends with a report and a stop, for manual review and commit.
+Each phase ended with a report and a stop, for manual review and commit.
+
+**This table is the original plan, kept as a record of how the work was**
+**sequenced.** Two rows did not survive contact with the build: the real-time
+transport of phase 8 was never introduced (see §11.2), and Deepgram was replaced
+by the browser Web Speech API, which costs nothing and needs no credential.
 
 | Phase | Deliverable | Runnable | Keys needed |
 |-------|-------------|----------|-------------|
@@ -637,7 +666,7 @@ Each phase ends with a report and a stop, for manual review and commit.
 | 5 | Mock long-running tools (labelled MOCK) | yes | none |
 | 6 | **Stale-result fencing and the event log** | yes | Anthropic |
 | 7 | Deterministic interruption; LLM and tool abort; turn truncation | yes | Anthropic |
-| 8 | **Real-time transport introduced**; microphone, VAD, STT, two-stage commit | yes | + Deepgram |
+| 8 | Microphone, VAD, two-stage commit, browser speech recognition | yes | none |
 | 9 | **Rime integration and request logging** | yes | + Rime |
 | 10 | Playback flush on interrupt; client-side generation drop | yes | all |
 | 11 | End-to-end travel assistant scenario | yes | all |
@@ -678,8 +707,17 @@ template with per-phase annotations.
 
 ## 15. Open questions
 
-- Rime's current endpoint, parameters, and model identifiers are unverified;
-  resolved by reading live documentation at the start of Phase 9.
-- Deepgram's exact speech-start event shape is unverified; resolved in Phase 8.
-- VAD thresholds require empirical tuning against a real microphone and room, and
-  cannot be finalised in advance.
+All three questions raised at design time are now closed.
+
+- **Rime endpoint, parameters and model identifiers — RESOLVED.** Verified
+  against the live API and the live voice catalogue; the exact shipped values
+  and the measurements are in [RIME_EVIDENCE.md](RIME_EVIDENCE.md) §4 and §6.
+  The check found a real defect: the original default pairing of mistv3 with
+  the speaker celeste is invalid and is now rejected at startup.
+- **Speech recognition — RESOLVED differently than planned.** Deepgram was not
+  used. The browser Web Speech API provides recognition at no cost and with no
+  credential; its limits are documented in the README under Known limitations.
+- **VAD thresholds — RESOLVED empirically.** Hand-tuned constants live in
+  packages/web/src/audio/voiceActivityDetector.ts. They are demo defaults for a
+  laptop microphone in a quiet room, not calibrated figures, which is why tier 2
+  confirmation exists before the generation advances.

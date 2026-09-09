@@ -1,7 +1,11 @@
 /**
- * Throwaway end-to-end verification of the MOCK tools.
- * Server must run with DEV_MOCK_TOOL_DELAY_MS=1500 and a known DEV_MOCK_TOOL_MODE.
- * Pass the expected mode as argv[2]. Scratchpad only, NOT committed.
+ * End-to-end verification of tool interruption and stale-result fencing.
+ *
+ * REQUIRES the server started with DEV_MOCK_TOOL_DELAY_MS set (e.g. 1500) and a
+ * known DEV_MOCK_TOOL_MODE. Pass the expected mode as argv[2]:
+ *
+ *   DEV_MOCK_TOOL_DELAY_MS=1500 DEV_MOCK_TOOL_MODE=stubborn npm run dev:server
+ *   npm run verify:http
  */
 const BASE = "http://127.0.0.1:8787";
 const MODE = (process.argv[2] ?? "cooperative") as "cooperative" | "stubborn";

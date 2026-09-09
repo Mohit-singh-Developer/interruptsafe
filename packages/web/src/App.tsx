@@ -671,262 +671,373 @@ export function App() {
   const listening = voice.status === "listening";
 
   return (
-    <main className="shell">
-      <header>
-        <div className="header-row">
-          <h1>InterruptSafe</h1>
-          <span
-            className="generation generation--current"
-            title="Current conversation generation. Advances on every new user turn and on every interruption."
-          >
-            {generation === null ? "no generation yet" : `generation ${generation}`}
-          </span>
+    <div className="page">
+      <nav className="nav">
+        <span className="nav__brand">InterruptSafe</span>
+        <div className="nav__links">
+          <a className="nav__link" href="#conversation">
+            Conversation
+          </a>
+          <a className="nav__link" href="#provider">
+            Provider
+          </a>
+          <a className="nav__link" href="#activity">
+            Activity
+          </a>
         </div>
-        <p className="tagline">
-          Advancing the generation is what invalidates outstanding work.
-          Cancellation is only ever requested, never relied upon.
-        </p>
-      </header>
-
-      {listening || speaking || voiceOutputNote !== null ? (
-        <section className="voicebar" aria-label="Voice status">
-          {listening ? (
-            <div
-              className={"voicebar__row" + (voice.loud ? " voicebar__row--active" : "")}
-            >
-              <span className="voicebar__badge">🎤 Listening</span>
-              {!speech.supported ? (
-                <span className="voicebar__hint">
-                  ⚠️ Speech recognition is unsupported in this browser. Voice can
-                  still interrupt; type to send messages.
-                </span>
-              ) : speech.status === "denied" ? (
-                <span className="voicebar__hint">
-                  ⚠️ Speech recognition permission denied.
-                </span>
-              ) : speech.interim.length > 0 ? (
-                <span className="voicebar__transcript">“{speech.interim}”</span>
-              ) : (
-                <span className="voicebar__hint">
-                  Speak — recognised words appear here, then become a message.
-                </span>
-              )}
-            </div>
-          ) : null}
-
-          {speaking ? (
-            <div className="voicebar__row voicebar__row--speaking">
-              <span className="voicebar__badge">🔊 Assistant speaking</span>
-              <span className="voicebar__hint">
-                Speak, or press Interrupt, to cut it off.
-              </span>
-            </div>
-          ) : null}
-
-          {voiceOutputNote !== null ? (
-            <div className="voicebar__row voicebar__row--warn">
-              <span className="voicebar__badge">⚠️ Voice output unavailable</span>
-              <span className="voicebar__hint">{voiceOutputNote}</span>
-            </div>
-          ) : null}
-        </section>
-      ) : null}
-
-      <section className="conversation" aria-label="Conversation">
-        {messages.length === 0 && !isSending ? (
-          <p className="empty">Send a message to start.</p>
-        ) : null}
-
-        {messages.map((message) =>
-          message.role === "interruption" ? (
-            <div key={message.id} className="interruption-marker" role="separator">
-              <span className="interruption-marker__label">
-                [{message.text}]
-                {message.generation !== undefined
-                  ? ` → generation ${message.generation}`
-                  : null}
-              </span>
-            </div>
-          ) : message.role === "notice" ? (
-            <p key={message.id} className="notice" role="status">
-              {message.text}
-            </p>
-          ) : (
-            <article
-              key={message.id}
-              className={
-                `message message--${message.role}` +
-                (message.superseded === true ? " message--superseded" : "")
-              }
-            >
-              <span className="message__role">
-                {message.role === "user" ? "You" : "Assistant"}
-                {message.generation !== undefined ? (
-                  <span
-                    className="generation"
-                    title="Generation this turn was processed under"
-                  >
-                    gen {message.generation}
-                  </span>
-                ) : null}
-                {message.superseded === true ? (
-                  <span className="generation generation--stale">not committed</span>
-                ) : null}
-              </span>
-              <p className="message__text">{message.text}</p>
-            </article>
-          ),
-        )}
-
-        {isSending ? (
-          activeTool !== null ? (
-            <p className="pending pending--tool" role="status">
-              Mock tool running: <strong>{activeTool}</strong>
-              {generation !== null ? (
-                <span className="generation">gen {generation}</span>
-              ) : null}
-            </p>
-          ) : (
-            <p className="pending" role="status">
-              Waiting for a response…
-            </p>
-          )
-        ) : null}
-
-        <div ref={endOfListRef} />
-      </section>
-
-      {error !== null ? (
-        <p className="error" role="alert">
-          {error}
-        </p>
-      ) : null}
-
-      <form className="composer" onSubmit={handleSubmit}>
-        <button
-          type="button"
-          className={
-            "button--mic" +
-            (voice.status === "listening" ? " button--mic-live" : "") +
-            (voice.loud ? " button--mic-loud" : "")
-          }
-          onClick={toggleListening}
-          disabled={
-            voice.status === "starting" ||
-            voice.status === "denied" ||
-            voice.status === "unavailable"
-          }
-          title={MIC_TITLES[voice.status]}
-          aria-label={MIC_TITLES[voice.status]}
+        <span
+          className="generation generation--current nav__generation"
+          title="Current conversation generation. Advances on every new user turn and on every interruption."
         >
-          {voice.status === "listening" ? (
-            <>
-              <span className="mic-dot" aria-hidden="true" />
-              {voice.loud ? "Voice detected" : "Listening"}
-            </>
-          ) : (
-            MIC_LABELS[voice.status]
-          )}
-        </button>
-        <input
-          type="text"
-          value={input}
-          onChange={(event) => setInput(event.target.value)}
-          placeholder="Type a message"
-          aria-label="Message"
-          autoComplete="off"
-          disabled={isSending}
-        />
-        {isSending ? (
-          <button type="button" className="button--interrupt" onClick={handleInterrupt}>
-            Interrupt
-          </button>
+          {generation === null ? "no generation yet" : `generation ${generation}`}
+        </span>
+      </nav>
+
+      <main className="shell">
+        <header className="hero">
+          <p className="hero__eyebrow">
+            For a driver — hands on the wheel, eyes on the road
+          </p>
+          <h1>Change your mind mid-sentence. It keeps up.</h1>
+          <p className="tagline">
+            Old work may keep running, but old work can never commit its result
+            once its generation has been superseded. Advancing the generation is
+            the correctness mechanism; cancellation is only ever requested, never
+            relied upon.
+          </p>
+        </header>
+
+        {listening || speaking || voiceOutputNote !== null ? (
+          <section className="voicebar" aria-label="Voice status">
+            {listening ? (
+              <div
+                className={"voicebar__row" + (voice.loud ? " voicebar__row--active" : "")}
+              >
+                <span className="voicebar__badge">🎤 Listening</span>
+                {!speech.supported ? (
+                  <span className="voicebar__hint">
+                    ⚠️ Speech recognition is unsupported in this browser. Voice can
+                    still interrupt; type to send messages.
+                  </span>
+                ) : speech.status === "denied" ? (
+                  <span className="voicebar__hint">
+                    ⚠️ Speech recognition permission denied.
+                  </span>
+                ) : speech.interim.length > 0 ? (
+                  <span className="voicebar__transcript">“{speech.interim}”</span>
+                ) : (
+                  <span className="voicebar__hint">
+                    Speak — recognised words appear here, then become a message.
+                  </span>
+                )}
+              </div>
+            ) : null}
+
+            {speaking ? (
+              <div className="voicebar__row voicebar__row--speaking">
+                <span className="voicebar__badge">🔊 Assistant speaking</span>
+                <span className="voicebar__hint">
+                  Speak, or press Interrupt, to cut it off.
+                </span>
+              </div>
+            ) : null}
+
+            {voiceOutputNote !== null ? (
+              <div className="voicebar__row voicebar__row--warn">
+                <span className="voicebar__badge">⚠️ Voice output unavailable</span>
+                <span className="voicebar__hint">{voiceOutputNote}</span>
+              </div>
+            ) : null}
+          </section>
         ) : null}
-        <button type="submit" disabled={isSending || input.trim().length === 0}>
-          {isSending ? "Sending…" : "Send"}
-        </button>
-      </form>
 
-      <section className="panel" aria-label="Speech provider and measurements">
-        <h2>Speech provider</h2>
-        {speechInfo === null ? (
-          <p className="empty">Checking…</p>
-        ) : speechInfo.provider === "rime" ? (
-          <p className="provider provider--active">
-            <strong>Rime</strong>
-            <span className="provider__detail">
-              model {speechInfo.model} · voice {speechInfo.speaker} · {speechInfo.language} ·{" "}
-              {speechInfo.audioFormat} · {speechInfo.endpoint}
-            </span>
+        <section className="panel--dark" id="conversation">
+          <div className="section-head">
+            <h2>Speak. Interrupt. Stay correct.</h2>
+            <p>
+              Every turn is stamped with the generation that was current when it
+              started. A reply that arrives after the user has moved on is shown
+              struck through and never enters the transcript.
+            </p>
+          </div>
+
+          <div className="conversation">
+            {messages.length === 0 && !isSending ? (
+              <p className="empty">Send a message to start.</p>
+            ) : null}
+
+            {messages.map((message) =>
+              message.role === "interruption" ? (
+                <div key={message.id} className="interruption-marker" role="separator">
+                  <span className="interruption-marker__label">
+                    [{message.text}]
+                    {message.generation !== undefined
+                      ? ` → generation ${message.generation}`
+                      : null}
+                  </span>
+                </div>
+              ) : message.role === "notice" ? (
+                <p key={message.id} className="notice" role="status">
+                  {message.text}
+                </p>
+              ) : (
+                <article
+                  key={message.id}
+                  className={
+                    `message message--${message.role}` +
+                    (message.superseded === true ? " message--superseded" : "")
+                  }
+                >
+                  <span className="message__role">
+                    {message.role === "user" ? "You" : "Assistant"}
+                    {message.generation !== undefined ? (
+                      <span
+                        className="generation"
+                        title="Generation this turn was processed under"
+                      >
+                        gen {message.generation}
+                      </span>
+                    ) : null}
+                    {message.superseded === true ? (
+                      <span className="generation generation--stale">not committed</span>
+                    ) : null}
+                  </span>
+                  <p className="message__text">{message.text}</p>
+                </article>
+              ),
+            )}
+
+            {isSending ? (
+              activeTool !== null ? (
+                <p className="pending pending--tool" role="status">
+                  Mock tool running: <strong>{activeTool}</strong>
+                  {generation !== null ? (
+                    <span className="generation">gen {generation}</span>
+                  ) : null}
+                </p>
+              ) : (
+                <p className="pending" role="status">
+                  Waiting for a response…
+                </p>
+              )
+            ) : null}
+
+            <div ref={endOfListRef} />
+          </div>
+        </section>
+
+        {error !== null ? (
+          <p className="error" role="alert">
+            {error}
           </p>
-        ) : (
-          <p className="provider provider--none">
-            <strong>None</strong>
-            <span className="provider__detail">
-              No Rime credential configured — the app runs in text mode. There is no
-              fallback synthesiser; nothing else speaks in Rime's place.
-            </span>
+        ) : null}
+
+        <form className="composer" onSubmit={handleSubmit}>
+          <button
+            type="button"
+            className={
+              "button--mic" +
+              (voice.status === "listening" ? " button--mic-live" : "") +
+              (voice.loud ? " button--mic-loud" : "")
+            }
+            onClick={toggleListening}
+            disabled={
+              voice.status === "starting" ||
+              voice.status === "denied" ||
+              voice.status === "unavailable"
+            }
+            title={MIC_TITLES[voice.status]}
+            aria-label={MIC_TITLES[voice.status]}
+          >
+            {voice.status === "listening" ? (
+              <>
+                <span className="mic-dot" aria-hidden="true" />
+                {voice.loud ? "Voice detected" : "Listening"}
+              </>
+            ) : (
+              MIC_LABELS[voice.status]
+            )}
+          </button>
+          <input
+            type="text"
+            value={input}
+            onChange={(event) => setInput(event.target.value)}
+            placeholder="Type a message"
+            aria-label="Message"
+            autoComplete="off"
+            disabled={isSending}
+          />
+          {isSending ? (
+            <button type="button" className="button--interrupt" onClick={handleInterrupt}>
+              Interrupt
+            </button>
+          ) : null}
+          <button type="submit" disabled={isSending || input.trim().length === 0}>
+            {isSending ? "Sending…" : "Send"}
+          </button>
+        </form>
+
+        <div className="grid-2">
+          <section className="card" id="provider">
+            <h2>Speech provider</h2>
+            {speechInfo === null ? (
+              <p className="empty">Checking…</p>
+            ) : speechInfo.provider === "rime" ? (
+              <p className="provider provider--active">
+                <strong>Rime</strong>
+                <span className="provider__detail">
+                  model {speechInfo.model} · voice {speechInfo.speaker} ·{" "}
+                  {speechInfo.language} · {speechInfo.audioFormat} ·{" "}
+                  {speechInfo.endpoint}
+                </span>
+              </p>
+            ) : (
+              <p className="provider provider--none">
+                <strong>None</strong>
+                <span className="provider__detail">
+                  No Rime credential configured — the app runs in text mode. There is
+                  no fallback synthesiser; nothing else speaks in Rime's place.
+                </span>
+              </p>
+            )}
+          </section>
+
+          <section className="card">
+            <h2>Measured this session</h2>
+            <p className="card__caveat">
+              Browser-side timings via <code>performance.now()</code>. They exclude
+              audio device output latency. Rime request duration is measured
+              server-side and includes network time — it is not time-to-first-byte.
+              Blank means not yet observed.
+            </p>
+            <dl className="metrics">
+              <dt>Turn → first audio</dt>
+              <dd>{fmtMs(metrics.timeToFirstAudioMs)}</dd>
+              <dt>Loudness → audio stopped</dt>
+              <dd>{fmtMs(metrics.detectionToSilenceMs)}</dd>
+              <dt>Loudness → speech confirmed</dt>
+              <dd>{fmtMs(metrics.vadToConfirmedMs)}</dd>
+              <dt>Interrupt round trip</dt>
+              <dd>{fmtMs(metrics.interruptRoundTripMs)}</dd>
+              <dt>Rime request (server-side)</dt>
+              <dd>{fmtMs(metrics.lastRimeUpstreamMs)}</dd>
+              <dt>Queued clips discarded</dt>
+              <dd>
+                {metrics.clipsDropped === null ? "—" : String(metrics.clipsDropped)}
+              </dd>
+            </dl>
+          </section>
+        </div>
+
+        <section className="panel--dark" id="activity">
+          <div className="section-head">
+            <h2>What the server actually recorded</h2>
+            <p>
+              Lifecycle events grouped by generation. Observability only — nothing
+              reads them back to decide anything.
+            </p>
+          </div>
+
+          {events.length === 0 ? (
+            <p className="empty">
+              Lifecycle events recorded by the server will appear here.
+            </p>
+          ) : (
+            groupByGeneration(events).map((group, index) => (
+              <div
+                className="activity__group"
+                key={`${group.generation ?? "none"}-${index}`}
+              >
+                <h3 className="activity__generation">
+                  {group.generation === undefined
+                    ? "no generation"
+                    : `generation ${group.generation}`}
+                </h3>
+                <ul className="activity__events">
+                  {group.events.map((event) => (
+                    <li
+                      key={event.id}
+                      className={
+                        "activity__event" +
+                        (INTERRUPTED_EVENTS.has(event.type)
+                          ? " activity__event--interrupted"
+                          : "")
+                      }
+                    >
+                      <span className="activity__label">{EVENT_LABELS[event.type]}</span>
+                      <span className="activity__detail">{event.detail}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))
+          )}
+        </section>
+      </main>
+
+      <footer className="footer">
+        <div className="footer__inner">
+          <p className="footer__note">
+            A full-duplex voice agent that never continues an outdated
+            conversation. Speech recognition runs in the browser and is free;
+            speech output is optional.
           </p>
-        )}
 
-        <h2 className="panel__subheading">Measured this session</h2>
-        <p className="panel__caveat">
-          Browser-side timings via <code>performance.now()</code>. They exclude audio
-          device output latency. Rime request duration is measured server-side and
-          includes network time — it is not time-to-first-byte. Blank means not yet
-          observed.
-        </p>
-        <dl className="metrics">
-          <dt>Turn → first audio</dt>
-          <dd>{fmtMs(metrics.timeToFirstAudioMs)}</dd>
-          <dt>Loudness → audio stopped</dt>
-          <dd>{fmtMs(metrics.detectionToSilenceMs)}</dd>
-          <dt>Loudness → speech confirmed</dt>
-          <dd>{fmtMs(metrics.vadToConfirmedMs)}</dd>
-          <dt>Interrupt round trip</dt>
-          <dd>{fmtMs(metrics.interruptRoundTripMs)}</dd>
-          <dt>Rime request (server-side)</dt>
-          <dd>{fmtMs(metrics.lastRimeUpstreamMs)}</dd>
-          <dt>Queued clips discarded</dt>
-          <dd>{metrics.clipsDropped === null ? "—" : String(metrics.clipsDropped)}</dd>
-        </dl>
-      </section>
+          <div className="footer__col">
+            <h3>On this page</h3>
+            <ul>
+              <li>
+                <a href="#conversation">Conversation</a>
+              </li>
+              <li>
+                <a href="#provider">Speech provider</a>
+              </li>
+              <li>
+                <a href="#activity">Activity</a>
+              </li>
+            </ul>
+          </div>
 
-      <section className="activity" aria-label="Conversation activity">
-        <h2>Conversation activity</h2>
+          <div className="footer__col">
+            <h3>Endpoints</h3>
+            <ul>
+              <li>
+                <a href="/api/health">GET /api/health</a>
+              </li>
+              <li>
+                <span>POST /api/chat</span>
+              </li>
+              <li>
+                <span>POST /api/interrupt</span>
+              </li>
+              <li>
+                <span>POST /api/tts</span>
+              </li>
+            </ul>
+          </div>
 
-        {events.length === 0 ? (
-          <p className="empty">
-            Lifecycle events recorded by the server will appear here.
-          </p>
-        ) : (
-          groupByGeneration(events).map((group, index) => (
-            <div className="activity__group" key={`${group.generation ?? "none"}-${index}`}>
-              <h3 className="activity__generation">
-                {group.generation === undefined
-                  ? "no generation"
-                  : `generation ${group.generation}`}
-              </h3>
-              <ul className="activity__events">
-                {group.events.map((event) => (
-                  <li
-                    key={event.id}
-                    className={
-                      "activity__event" +
-                      (INTERRUPTED_EVENTS.has(event.type)
-                        ? " activity__event--interrupted"
-                        : "")
-                    }
-                  >
-                    <span className="activity__label">{EVENT_LABELS[event.type]}</span>
-                    <span className="activity__detail">{event.detail}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))
-        )}
-      </section>
-    </main>
+          <div className="footer__col">
+            <h3>Third party</h3>
+            <ul>
+              <li>
+                <a href="https://docs.rime.ai" target="_blank" rel="noreferrer">
+                  Rime — speech output
+                </a>
+              </li>
+              <li>
+                <span>Web Speech API — recognition</span>
+              </li>
+              <li>
+                <span>No other service is contacted</span>
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        <div className="footer__wordmark" aria-hidden="true">
+          InterruptSafe
+        </div>
+      </footer>
+    </div>
   );
 }

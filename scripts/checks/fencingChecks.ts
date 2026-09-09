@@ -1,5 +1,5 @@
 /**
- * Throwaway verification of the interruption correctness core.
+ * Verification of the interruption correctness core.
  * Lives in the scratchpad, NOT the repo. The real test suite is Phase 14.
  */
 const base = "../../packages/server/src/session";

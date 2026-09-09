@@ -1,7 +1,6 @@
 /**
- * Throwaway headless verification of the local voice activity detector.
+ * Verification of the local voice activity detector.
  * Stubs the browser audio APIs so the VAD logic can be exercised in Node.
- * Scratchpad only, NOT committed.
  */
 
 let failures = 0;

@@ -1,6 +1,10 @@
 /**
- * Throwaway end-to-end verification of the optional TTS endpoint.
- * argv[2] = "unconfigured" | "fakekey". Scratchpad only, NOT committed.
+ * End-to-end verification of the speech endpoint.
+ *
+ * argv[2] selects the scenario the server must be started for:
+ *   "unconfigured" - no RIME_API_KEY set; expects a clean 503
+ *   "fakekey"      - RIME_API_KEY set to an invalid value; expects a 502,
+ *                    and proves no Rime call is made for a superseded turn
  */
 const BASE = "http://127.0.0.1:8787";
 const MODE = (process.argv[2] ?? "unconfigured") as "unconfigured" | "fakekey";

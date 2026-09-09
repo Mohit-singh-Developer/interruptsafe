@@ -129,25 +129,45 @@ Everything below is committed and runnable from a clean checkout.
 npm install
 npm run typecheck
 npm run build
-npm run verify            # 7 offline suites: fencing, generation, conversation
-                          # state, events, VAD, playback queue, speech text
+npm run verify            # 8 offline suites: fencing, generation, conversation
+                          # state, events, VAD, playback queue, speech text,
+                          # tool intent
 ```
 
 `npm run verify` needs no credential, no network and no running server. It exits
 non-zero if any suite fails, so it works in CI.
 
-The HTTP suites need a server. In one terminal:
+The HTTP suites need a running server, and they need it started with **both**
+development delays. Three of the four interrupt work while it is still in
+flight, so without an artificial delay the mock finishes first and there is
+nothing to interrupt — the suites then fail for the wrong reason.
+
+In one terminal:
 
 ```
-DEV_MOCK_TOOL_DELAY_MS=3000 DEV_MOCK_TOOL_MODE=stubborn npm run dev:server
+DEV_DETERMINISTIC_DELAY_MS=1500 DEV_MOCK_TOOL_DELAY_MS=1500 DEV_MOCK_TOOL_MODE=stubborn npm run dev:server
+```
+
+PowerShell:
+
+```
+$env:DEV_DETERMINISTIC_DELAY_MS=1500; $env:DEV_MOCK_TOOL_DELAY_MS=1500; $env:DEV_MOCK_TOOL_MODE="stubborn"; npm run dev:server
 ```
 
 and in another:
 
 ```
-npm run verify:http                      # A1-A6, A9 - the interruption scenario
+npm run verify:http                      # A1-A6, A9 - tool interruption + fencing
 npx tsx scripts/http/httpInterrupt.ts    # text-path interruption
 npx tsx scripts/http/httpActivity.ts     # activity timeline + transcript
+```
+
+All three report `ALL CHECKS PASSED` against that one server.
+
+The fourth suite asserts behaviour with **no** credential configured, so it
+needs a server started without `RIME_API_KEY`:
+
+```
 npx tsx scripts/http/httpTts.ts unconfigured   # graceful no-credential behaviour
 ```
 
@@ -180,7 +200,7 @@ SKIP  real synthesis — configuration failed above; fix that first
 which is the exact defect this project shipped with before the catalogue was
 checked.
 
-### 5.2 Manual (browser)
+### 5.3 Manual (browser)
 
 1. `DEV_MOCK_TOOL_DELAY_MS=3000 DEV_MOCK_TOOL_MODE=stubborn npm run dev`
 2. Open `http://localhost:5173` in Chrome or Edge.
@@ -250,6 +270,20 @@ This test found and fixed a real defect: the queue previously **deadlocked**
 after a flush, because the promise for the stopped clip was never settled — so
 no new-generation audio would ever have played. That is precisely the failure
 A8 guards against, and it would have broken the demo.
+
+A **second** deadlock, distinct from the first, was found later in the same
+queue and is now covered by a regression test. `audio.play()` resolves
+asynchronously — the browser decodes before playback begins — and an
+interruption landing inside that window stopped the clip *before* its completion
+promise existed, so nothing could ever settle it. The drain loop was then left
+awaiting forever with its `draining` flag stuck true, which silently disabled
+**all** later audio including the new generation's: the interruption appeared to
+work, and the application never spoke again for the rest of the session.
+
+That window is not an unlikely one. It is the moment the assistant starts
+talking, which is precisely when a user barges in. The test holds `play()`
+pending, interrupts, and then asserts that new-generation audio still plays;
+removing the guard makes it fail.
 
 **Limitation:** this is a headless test with a stubbed `HTMLAudioElement`. It
 proves the queue's logic, not the browser's audio-device behaviour.

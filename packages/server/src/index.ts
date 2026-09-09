@@ -18,8 +18,10 @@ import { registerRoutes } from "./transport/routes";
  * owned by `ConversationState`, and every turn is stamped with a generation
  * that must still be current before the result may be committed.
  *
- * There is still no streaming, no tools and no WebSocket transport. Those
- * arrive in later phases.
+ * Mock travel tools run behind the same generation stamp, and committed
+ * replies are synthesised by Rime through a separate presentation endpoint.
+ * There is no token streaming and no WebSocket transport: every route here is
+ * plain HTTP request/response.
  */
 
 // Configuration and provider construction happen before the server starts, so a

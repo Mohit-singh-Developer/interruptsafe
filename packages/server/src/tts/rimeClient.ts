@@ -9,7 +9,7 @@ import type { RimeConfig } from "../config";
  *   Authorization: Bearer <key>
  *   Content-Type: application/json
  *   Accept: audio/wav
- *   { "text": "...", "speaker": "celeste", "modelId": "mistv3" }
+ *   { "text": "...", "speaker": "luna", "modelId": "mistv3", "lang": "eng" }
  *
  * `modelId` is documented as `coda` (flagship quality) or `mistv3` (lowest
  * latency). No undocumented parameters are sent.

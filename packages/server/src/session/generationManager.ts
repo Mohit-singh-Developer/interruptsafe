@@ -31,14 +31,16 @@
  * ## Scope
  *
  * `docs/ARCHITECTURE.md` section 6 also sketches `signalFor(g): AbortSignal`.
- * That is not implemented here: there is no in-flight cancellable work in the
- * system yet, so it would be a speculative API. It arrives with the phase that
- * introduces work worth cancelling, and when it does it must remain an
- * optimisation layered on top of this check, never a replacement for it.
+ * It is deliberately absent. Cancellation capability lives in
+ * `inFlightRegistry.ts` instead, so that the thing which decides correctness
+ * shares no state with the thing that merely saves work. Putting a controller
+ * here would invite exactly the coupling this design exists to avoid.
  *
- * Enforcement of the check at the point where results enter the conversation -
- * the fencing choke point and its event log - is a later phase. This class
- * provides the primitive; it does not police its callers.
+ * This class provides the primitive and does not police its callers. The check
+ * is enforced at the single point where results may enter a conversation -
+ * `fencedCommit.ts` - which is the only caller that matters, and the event log
+ * in `conversationEvents.ts` records what it decided. Nothing reads those
+ * events back to make a decision.
  */
 
 export type Generation = number;

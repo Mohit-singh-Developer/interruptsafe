@@ -155,6 +155,23 @@ export class AssistantSpeechQueue {
       return false;
     }
 
+    // `play()` resolves asynchronously - the browser has to decode before
+    // playback begins - and the user can interrupt inside that window. It is
+    // in fact the *likeliest* moment for them to, because it is the moment the
+    // assistant starts talking over them.
+    //
+    // If that happened, `stopCurrent` has already paused this element, revoked
+    // its URL and cleared `this.audio`, but it could not settle this clip's
+    // promise because the promise below does not exist yet. Adopting the clip
+    // now would attach handlers to a paused element whose `ended` event can
+    // never fire, leaving the drain loop awaiting forever with `draining` stuck
+    // true - which silently disables ALL later audio, including the new
+    // generation's. Bail out instead and let the drain loop end cleanly.
+    if (this.audio !== audio) {
+      audio.pause();
+      return false;
+    }
+
     if (!this.startedThisGeneration) {
       this.startedThisGeneration = true;
       this.hooks.onPlaybackStarted(clip.generation);

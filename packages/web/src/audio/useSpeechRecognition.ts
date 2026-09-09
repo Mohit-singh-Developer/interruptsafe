@@ -65,6 +65,10 @@ interface RecognitionInstance {
   onstart: (() => void) | null;
 }
 
+/** Restarts allowed inside one window before recognition is declared broken. */
+const MAX_RAPID_RESTARTS = 5;
+const RAPID_RESTART_WINDOW_MS = 2000;
+
 type RecognitionConstructor = new () => RecognitionInstance;
 
 function getRecognitionConstructor(): RecognitionConstructor | null {
@@ -122,6 +126,19 @@ export function useSpeechRecognition(
   /** True while the user wants to be listening, across automatic restarts. */
   const wantListeningRef = useRef(false);
 
+  /**
+   * Guard against a hot restart loop.
+   *
+   * Continuous recognition ends by itself after a pause, and restarting is the
+   * intended behaviour. But when recognition fails *immediately* and keeps
+   * failing - Chrome and Edge send audio to a remote service, so losing the
+   * network does exactly this - `onend` fires straight after `start()` and the
+   * restart becomes an unthrottled loop that burns CPU and battery while the
+   * UI reports nothing wrong. After enough restarts in a short window, stop
+   * and say so; the user can press the button again.
+   */
+  const restartsRef = useRef({ count: 0, windowStartedAt: 0 });
+
   // Created once, not per render.
   if (supported && recognitionRef.current === null) {
     const Recognition = getRecognitionConstructor()!;
@@ -146,6 +163,9 @@ export function useSpeechRecognition(
 
         const text = result[0]?.transcript?.trim() ?? "";
         if (text.length === 0) continue;
+
+        // Recognition is demonstrably working, so the restart guard resets.
+        restartsRef.current.count = 0;
 
         // Any recognised words at all confirm that speech is happening.
         callbacksRef.current.onRecognisedActivity();
@@ -175,9 +195,26 @@ export function useSpeechRecognition(
 
     recognition.onend = () => {
       setInterim("");
-      // Continuous recognition still ends on its own, typically after a pause.
-      // Restart only while the user still wants to listen, so this cannot spin.
+      // Continuous recognition still ends on its own, typically after a pause,
+      // so restarting while the user wants to listen is the normal path.
       if (wantListeningRef.current) {
+        const now = Date.now();
+        const restarts = restartsRef.current;
+
+        if (now - restarts.windowStartedAt > RAPID_RESTART_WINDOW_MS) {
+          restarts.count = 0;
+          restarts.windowStartedAt = now;
+        }
+        restarts.count += 1;
+
+        // Ending this many times this quickly means recognition is not working
+        // at all, and restarting again would just spin.
+        if (restarts.count > MAX_RAPID_RESTARTS) {
+          wantListeningRef.current = false;
+          setStatus("error");
+          return;
+        }
+
         try {
           recognition.start();
         } catch {
@@ -196,6 +233,7 @@ export function useSpeechRecognition(
     if (recognition === null) return;
 
     wantListeningRef.current = true;
+    restartsRef.current = { count: 0, windowStartedAt: Date.now() };
     setStatus("starting");
     try {
       recognition.start();

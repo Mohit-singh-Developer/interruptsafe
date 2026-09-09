@@ -1,6 +1,5 @@
 /**
- * Throwaway headless verification of the clause chunker and the
- * generation-stamped playback queue. Scratchpad only, NOT committed.
+ * Verification of the clause chunker and the generation-stamped playback queue.
  */
 let failures = 0;
 function check(label: string, actual: unknown, expected: unknown): void {
@@ -19,6 +18,9 @@ const tick = () => new Promise((r) => setTimeout(r, 5));
 const created: StubAudio[] = [];
 let revoked = 0;
 let playRejectsWith: string | null = null;
+/** When set, play() stays pending until the test releases it. */
+let holdPlay = false;
+let releasePlay: (() => void) | null = null;
 
 class StubAudio {
   onended: (() => void) | null = null;
@@ -36,6 +38,9 @@ class StubAudio {
       error.name = playRejectsWith;
       throw error;
     }
+    // Real browsers decode before playback begins, so play() does not resolve
+    // immediately. Modelling that delay is what exposes the interrupt window.
+    if (holdPlay) await new Promise<void>((r) => (releasePlay = r));
   }
   pause(): void {
     this.paused = true;
@@ -176,6 +181,53 @@ console.log("\n--- playback queue: autoplay refusal is reported, not silent ---"
   check("autoplay block is surfaced", q.autoplayBlocked, true);
   check("nothing is left playing", q.isPlaying, false);
   playRejectsWith = null;
+}
+
+console.log("\n--- playback queue: interrupted while play() is still resolving ---");
+{
+  // REGRESSION. play() resolves asynchronously, because the browser decodes
+  // before playback begins - and the likeliest moment for the user to barge in
+  // is the moment the assistant starts speaking, i.e. inside that window.
+  //
+  // The clip was being stopped before its completion promise existed, so
+  // nothing could ever settle it. That wedged the drain loop with
+  // draining=true and silently killed ALL later audio, the new generation
+  // included: the interruption looked like it worked, and the app then never
+  // spoke again for the rest of the session.
+  created.length = 0;
+  holdPlay = true;
+  releasePlay = null;
+  let idle = 0;
+  const q = new AssistantSpeechQueue({
+    onPlaybackStarted: () => {},
+    onIdle: () => {
+      idle += 1;
+    },
+  });
+
+  q.setGeneration(1);
+  q.enqueue(1, blob("g1"));
+  await tick();
+  check("the clip exists but play() has not resolved yet", created.length, 1);
+
+  // The user interrupts inside the play() window.
+  q.flush();
+  releasePlay?.();
+  await tick();
+  check("the superseded clip was paused", created[0]!.paused, true);
+  check("nothing is playing", q.isPlaying, false);
+
+  // The real question: can the next generation still be heard?
+  q.setGeneration(2);
+  q.enqueue(2, blob("g2"));
+  await tick();
+  releasePlay?.();
+  await tick();
+  check("new-generation audio still plays (queue not deadlocked)", created.length, 2);
+  check("the queue reported going idle after the interruption", idle > 0, true);
+
+  holdPlay = false;
+  releasePlay = null;
 }
 
 console.log(`\n${failures === 0 ? "ALL CHECKS PASSED" : `${failures} CHECK(S) FAILED`}`);

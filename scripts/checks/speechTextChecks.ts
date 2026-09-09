@@ -1,6 +1,5 @@
 /**
- * Throwaway verification of prepareForSpeech against Rime's official guidance.
- * Scratchpad only, NOT committed.
+ * Verification of prepareForSpeech against Rime's official guidance.
  */
 const mod = (await import(
   "../../packages/shared/src/speechText.ts"
