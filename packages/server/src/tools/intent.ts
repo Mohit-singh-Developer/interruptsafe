@@ -94,6 +94,36 @@ function clean(value: string | undefined): string | undefined {
 }
 
 /**
+ * Words that mark a message as an actual request rather than a mention.
+ *
+ * Matching a bare keyword is not enough. "why are you just asking me about
+ * hotels" contains "hotels" but is a complaint, and answering it with a hotel
+ * search - which is what happened before this existed - makes the assistant
+ * look like it is not listening. That is worse than saying nothing useful,
+ * because the user is told, out loud, an answer to a question they did not ask.
+ */
+const REQUEST_CUES =
+  /\b(find|show|search|look|looking|get|give|list|need|want|book|check|suggest|recommend|nearest|closest|any|where|what|which|make it|change|switch)\b/i;
+
+/** How far into a message a keyword can appear and still lead the request. */
+const KEYWORD_LEAD_WORDS = 2;
+
+/**
+ * True when the message is asking for something, not merely mentioning it.
+ *
+ * Either an explicit request cue, or the keyword leading the message the way a
+ * spoken request does - "hotels in Goa" is a request; "I hate hotels in
+ * general" is not.
+ */
+function looksLikeRequest(message: string, keyword: string): boolean {
+  if (REQUEST_CUES.test(message)) return true;
+
+  const words = message.toLowerCase().split(/\s+/).filter(Boolean);
+  const position = words.findIndex((word) => word.includes(keyword));
+  return position >= 0 && position < KEYWORD_LEAD_WORDS;
+}
+
+/**
  * Returns the tool a message asks for, or null for an ordinary message.
  *
  * Hotels are checked before weather so that "hotels in Goa with good weather"
@@ -102,7 +132,7 @@ function clean(value: string | undefined): string | undefined {
 export function detectToolIntent(message: string): ToolIntent | null {
   const lower = message.toLowerCase();
 
-  if (lower.includes("flight")) {
+  if (lower.includes("flight") && looksLikeRequest(message, "flight")) {
     const withFrom = ROUTE_WITH_FROM.exec(message);
     const bare = withFrom ?? ROUTE_BARE.exec(message);
 
@@ -115,11 +145,11 @@ export function detectToolIntent(message: string): ToolIntent | null {
     };
   }
 
-  if (lower.includes("hotel")) {
+  if (lower.includes("hotel") && looksLikeRequest(message, "hotel")) {
     return { tool: "searchHotels", input: { city: clean(CITY.exec(message)?.[1]) } };
   }
 
-  if (lower.includes("weather")) {
+  if (lower.includes("weather") && looksLikeRequest(message, "weather")) {
     return { tool: "checkWeather", input: { city: clean(CITY.exec(message)?.[1]) } };
   }
 

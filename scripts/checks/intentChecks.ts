@@ -91,6 +91,30 @@ console.log("\n--- trailing words must not become part of the place ---");
   });
 }
 
+console.log("\n--- a keyword must be a request, not a mention ---");
+{
+  // REGRESSION, seen in a real browser session: complaining ABOUT hotels ran a
+  // hotel search and read three invented hotels aloud. Answering a question the
+  // user did not ask is worse than answering nothing, because they hear it.
+  intent(
+    "complaining about hotels is not a hotel search",
+    "why are you just asking me about hotels and droughts",
+    null,
+  );
+  intent("a mention mid-sentence does not fire", "I hate hotels in general", null);
+  intent(
+    "talking about the weather in passing does not fire",
+    "my friend was talking about the weather yesterday",
+    null,
+  );
+
+  // ...but genuine requests still work, with or without a cue word.
+  intent("a keyword-led request fires", "hotels in Goa", "searchHotels", { city: "Goa" });
+  intent("a cue word anywhere fires", "I need hotels in Jaipur", "searchHotels", {
+    city: "Jaipur",
+  });
+}
+
 console.log("\n--- multi-word places still survive ---");
 {
   intent("a two-word city is kept whole", "Find hotels in New Delhi", "searchHotels", {
