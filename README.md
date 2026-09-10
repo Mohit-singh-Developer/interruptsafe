@@ -5,6 +5,7 @@ user interrupts, playback stops, the conversation advances to a new generation,
 and results from the superseded generation can no longer re-enter it.
 
 > **▶ Demo video:** https://drive.google.com/drive/folders/1_UYYrL8AU-MGLmGkpr17taAjCQjUQP7F?usp=sharing
+> · **Slides:** https://docs.google.com/presentation/d/12BDca2zh9h6dGNXr7MjI0VymAYIGojIT/edit?usp=sharing
 >
 > **Hard voice problem:** interruption and recovery — [the claim and its
 > acceptance test](docs/RIME_EVIDENCE.md#1-claim) ·
