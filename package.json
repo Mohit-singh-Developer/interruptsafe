@@ -4,6 +4,11 @@
   "private": true,
   "type": "module",
   "description": "A full-duplex voice agent that never continues an outdated conversation.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Mohit-singh-Developer/interruptsafe.git"
+  },
+  "homepage": "https://github.com/Mohit-singh-Developer/interruptsafe#readme",
   "engines": {
     "node": ">=22"
   },
