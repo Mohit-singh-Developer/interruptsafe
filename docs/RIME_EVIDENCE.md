@@ -5,11 +5,13 @@ Evidence for the hard voice claim made by InterruptSafe.
 **Honesty statement, up front.** Every result marked **MEASURED** was produced
 by running the commands given, against the real Rime API with a real key.
 Nothing is invented. One thing remains outside what an automated run can
-establish: **nobody has listened to the audio yet.** The clips are verified to
-be genuine non-silent WAVE speech waveforms of the right duration, and a
-playable sample is committed at `docs/evidence/rime-mistv3-luna-hello.wav`, but
-Rime's own quickstart is right that "hearing speech is the success condition" —
-that final step needs a human ear.
+establish: **no one has sat down and judged how it sounds.** The audio is
+verified to be genuine non-silent WAVE speech of the right duration, and the
+waveform checks in §6.9 find no clipping, no truncation, no dropouts and normal
+pacing — but "no defect detected" is not "sounds right". Rime's own quickstart
+puts it correctly: hearing speech is the success condition, and that step needs
+a human ear. A playable sample is committed at
+`docs/evidence/rime-mistv3-luna-hello.wav`.
 
 ---
 
@@ -125,7 +127,7 @@ does not process it", so the two pages disagree about coda — but agree that
 `mistv3`, which this project ships, has it.
 
 So it was implemented, tested against the live API, and then removed. Section
-4.2 has the numbers.
+4.3 has the numbers.
 
 **MEASURED.** The real mock-tool reply, captured from a running server and put
 through `prepareForSpeech`:
@@ -457,6 +459,97 @@ never once worked through the server before this fix**, and no amount of
 testing with an invalid key would have revealed it — the 502 looked like an
 auth failure.
 
+### 6.8 Live browser session — OBSERVED
+
+Everything above this point is either an automated run or a headless test. This
+section is different: it records what the application actually did in Chrome,
+with a microphone, a real Rime credential, and a person talking over it.
+
+**Provenance, stated plainly.** These figures were read off the application's own
+**Measured this session** panel during browser sessions run by the author, and
+reported here from screenshots of that panel. They were not produced by a script
+in this repository, and they are not reproducible byte-for-byte — they depend on
+the machine, the microphone, the room and the network. They are included because
+the alternative is having no user-path measurement at all, which is the thing the
+challenge actually asks to see.
+
+| Metric | Session A | Session B |
+|--------|-----------|-----------|
+| Turn → first audio | 1401 ms | 2115 ms |
+| Loudness → audio stopped | 1 ms | 2 ms |
+| Loudness → speech confirmed | 368 ms | 42 ms |
+| Interrupt round trip | 11 ms | 8 ms |
+| Rime request (server-side, includes network) | 339 ms | 607 ms |
+| Queued clips discarded | 1 | 1 |
+
+All uncached — there is no caching layer, so every clause is a fresh Rime
+request (see §7).
+
+**Behaviour observed alongside those numbers:**
+
+- The **Speech provider** panel reported `rime · mistv3 · luna · eng · audio/wav`
+  with the live endpoint, so the active provider was observable rather than
+  asserted.
+- Both interruption notices appeared in the right order — loudness first, then
+  *"Speech confirmed (words recognised)"* — confirming the two tiers are
+  distinguishable to the user and not collapsed into one.
+- The interruption marker and generation advance rendered, and later turns
+  committed at higher generations.
+- Playback demonstrably started: `Turn → first audio` cannot populate unless a
+  clip actually began playing.
+
+**The number worth dwelling on is 1–2 ms.** That is loudness detected to audio
+stopped — the barge-in the driver actually perceives. It is small because tier 1
+does not wait for anything: it flushes the queue on the raw energy signal, and
+only tier 2 (42–368 ms here) touches the conversation. Splitting those two costs
+nothing and is what stops a cough from rewriting the trip.
+
+**What this section does not establish** is whether the speech *sounds* right.
+See §8.1 — that still needs a human ear, and no measurement substitutes for it.
+
+### 6.9 Mechanical audio checks — MEASURED
+
+```
+npm run audio:qa
+```
+
+Synthesises the lines the demo actually speaks through the **shipped path** —
+the same `RimeClient` the server uses, with `prepareForSpeech` applied — then
+decodes the PCM and checks the waveform for the defects that make synthesised
+speech sound wrong. It parses the RIFF container by walking its chunks rather
+than assuming a 44-byte header, so an encoder that inserts a `LIST` chunk cannot
+make it read metadata as audio and report confident nonsense.
+
+| Line | Duration | Pace | Peak | RMS | Clipping | Lead | Tail | Longest gap |
+|------|----------|------|------|-----|----------|------|------|-------------|
+| `3 mock hotels in Jaipur.` | 1.81 s | 221 u/min¹ | 89.5% | 15.3% | 0.00% | 152 ms | 303 ms | 53 ms |
+| `Harbour View, Jaipur 4 star approx 2539 rupees` | 4.81 s | 177 u/min | 94.7% | 13.3% | 0.00% | 128 ms | 276 ms | 198 ms |
+| `IS486 Delhi to Mumbai departs 08:00 approx 3586` | 7.40 s | 164 u/min | 85.9% | 12.2% | 0.00% | 138 ms | 293 ms | 305 ms |
+| `Which two cities are you flying between?` | 2.19 s | 237 u/min | 80.3% | 13.5% | 0.00% | 135 ms | 290 ms | 36 ms |
+| `I only handle hotels, flights and weather…` | 4.68 s | 224 u/min | 80.5% | 13.4% | 0.00% | 132 ms | 265 ms | 110 ms |
+
+¹ Under 1.5 s of speech, so pace is reported but not judged — instantaneous rate
+is too noisy over a short phrase to mean anything.
+
+**Result: no mechanical defects detected.** No clipping on any line. Peaks sit
+between 80% and 95% of full scale, which is healthy headroom rather than a
+signal pinned at the ceiling. Every clip has 265–303 ms of trailing silence, so
+none was cut off mid-word. The longest internal gap is 305 ms, on the line with
+a flight code and a time — a pause where a listener expects one, not a dropout.
+
+**Pace is measured in estimated spoken units, not words, and that distinction
+was forced by the data.** The first version of this check counted words, and
+reported the flight-code line at 80 wpm and a short phrase at 241 wpm — flagging
+four of five lines as defective. Neither figure was real: `IS486` is one word but
+five spoken units, and `3586` is one word but several. The audio was fine and the
+metric was wrong. Expanding alphanumeric tokens puts every line between 164 and
+237 units per minute, comfortably inside natural conversational range.
+
+**What this does not establish.** It cannot hear. Intelligibility, whether `luna`
+suits a driving assistant, and whether the clause pacing feels natural are
+listening judgements — see §8.1. A pass here means "nothing is broken", which is
+the half a machine can honestly answer.
+
 ## 7. Measurements
 
 The application measures and displays, in the browser:
@@ -485,16 +578,23 @@ time from network time, and is **not** a time-to-first-byte measurement.
 
 ## 8. Limitations
 
-1. **PARTIALLY VERIFIED: nobody has listened yet.** Synthesis is confirmed to
+1. **PARTIALLY VERIFIED: no formal listening review.** Mechanical checks on the
+   real audio find no defect - no clipping, no truncation, no dropouts, natural
+   pacing (§6.9) - and that is as far as a machine can go. Synthesis is confirmed to
    return genuine, non-silent WAVE speech of the correct duration through the
    full shipped path, and a playable clip is committed. What automated checks
    cannot establish is intelligibility, voice suitability, or clause pacing.
    Play `docs/evidence/rime-mistv3-luna-hello.wav` — it should say *"Hello! This
    is Rime speaking."* — and run the browser demo once to confirm playback and
    pacing in situ.
-2. **UNVERIFIED: live browser behaviour.** Microphone capture, speech
-   recognition, and audio playback were not exercised in a real browser by the
-   author; they are covered by headless tests and typechecking only.
+2. **PARTIALLY VERIFIED: live browser behaviour.** Microphone capture, speech
+   recognition, interruption and audio playback *have* now been exercised in
+   Chrome with a real credential — the observations and the user-path timings
+   are in §6.8. What remains unverified there is breadth rather than existence:
+   the sessions were run on one machine, one microphone and one network, by one
+   speaker, so the figures characterise that setup and not the general case.
+   Behaviour on other browsers, devices, accents and network conditions is
+   untested.
 3. **Voice activity detection is an energy threshold**, not production VAD. It
    cannot distinguish speech from a door slam — which is exactly why tier 2
    confirmation exists.

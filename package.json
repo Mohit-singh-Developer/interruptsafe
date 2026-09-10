@@ -18,7 +18,8 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "verify": "tsx scripts/verify.ts",
     "verify:http": "tsx scripts/http/httpTools.ts stubborn",
-    "preflight:rime": "tsx scripts/preflight-rime.ts"
+    "preflight:rime": "tsx scripts/preflight-rime.ts",
+    "audio:qa": "tsx scripts/audio-qa.ts"
   },
   "devDependencies": {
     "concurrently": "^10.0.5",

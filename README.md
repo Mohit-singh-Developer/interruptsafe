@@ -4,6 +4,14 @@ A full-duplex voice agent that never continues an outdated conversation: when th
 user interrupts, playback stops, the conversation advances to a new generation,
 and results from the superseded generation can no longer re-enter it.
 
+> **▶ Demo video:** https://drive.google.com/drive/folders/1_UYYrL8AU-MGLmGkpr17taAjCQjUQP7F?usp=sharing
+>
+> **Hard voice problem:** interruption and recovery — [the claim and its
+> acceptance test](docs/RIME_EVIDENCE.md#1-claim) ·
+> **Speech provider:** Rime `mistv3` / `luna` / `eng`, observable at
+> `GET /api/health` · **Reproduce it:** `npm run verify` needs no credential and
+> no network.
+
 ## Who this is for
 
 **A driver, mid-journey, with both hands on the wheel and both eyes on the road.**
@@ -175,8 +183,8 @@ network call and return invented data derived from a hash of the input — never
 real flight, weather, or hotel information, and nothing they produce should be
 presented as genuine.
 
-| Tool | Triggered by a message containing | Arguments parsed |
-|------|-----------------------------------|------------------|
+| Tool | Keyword | Arguments parsed |
+|------|---------|------------------|
 | `searchFlights` | `flight` | `from <a> to <b>`, or `<a> to <b>` |
 | `searchHotels` | `hotel` | `in <city>` |
 | `checkWeather` | `weather` | `in <city>` |
@@ -193,10 +201,26 @@ What is the weather in Jaipur
 Find flights from Delhi to Mumbai
 ```
 
-**Phrasing note.** The city is read to the end of the phrase or to the next
-punctuation mark, so `hotels in Udaipur` parses as `Udaipur` but
-`hotels in Udaipur instead` parses as `Udaipur instead`. End the sentence on the
-place name, or put a comma after it.
+**A keyword alone is not enough.** The message must also read as a request —
+either it carries a request cue (`find`, `need`, `check`, `where`, `what`,
+`make it`…) or the keyword leads the sentence. So "hotels in Goa" runs a search
+and "why are you asking me about hotels" does not. Answering a question the user
+did not ask is worse than answering nothing, because in a voice product they
+*hear* it.
+
+**A missing place is asked for, never invented.** "Find some flights" with no
+cities replies *"Which two cities are you flying between?"* rather than
+substituting a default. An earlier build answered confidently about Delhi to
+Mumbai — a route the user had never mentioned — which is precisely the failure
+this project exists to prevent. The question is returned immediately, without
+the artificial tool delay, because there is nothing to look up.
+
+**Place names end where the letters end** — at punctuation, a digit, a symbol or
+the end of the message — and trailing qualifiers are trimmed. So
+`hotels in Udaipur instead`, `hotels in Jaipur under 3000` and
+`flights from Delhi to Mumbai 9am` all parse correctly. This matters for the
+voice path in particular: speech recognition supplies no punctuation and readily
+appends qualifiers.
 
 A tool never touches conversation state. It returns a value, and
 `packages/server/src/tools/dispatch.ts` decides whether that value is still
@@ -288,8 +312,10 @@ markdown and bullets, rewrites arrows and symbols as words (`Delhi -> Mumbai` �
 "Delhi to Mumbai"), flattens parenthetical asides, writes out non-dollar
 currency (`INR 3586` → "3586 rupees"), and keeps spoken sentences under 25
 words. **No SSML is ever sent** — Rime does not support it — and `spell()` is
-not used, because inline pronunciation control is not listed for `mistv3`. This
-changes only what is *spoken*; the displayed transcript is untouched.
+not used, because an A/B render showed no evidence it was being processed
+(§4.3 of the evidence doc). Rate slashes are spoken: `3056 rupees/night` becomes
+"per night", not "slash night". This changes only what is *spoken*; the
+displayed transcript is untouched.
 
 ⚠️ `celeste` is a **`coda`** voice and is *not* available on `mistv3`. The server
 rejects that pairing at startup rather than failing on the first spoken turn.
@@ -349,48 +375,56 @@ Stated plainly, because a reviewer will hit these.
    implementation.
 3. **English only.** `lang` is fixed to `eng`. No multilingual or
    code-switched routing is attempted.
-4. **`spell()` is not used.** Rime lists inline pronunciation control for
-   `mistv2` and `coda`, not for the `mistv3` this project ships, so flight
-   codes are read plainly rather than spelled.
-5. **Nobody has listened to the audio in a formal review yet.** Synthesis is
-   verified to return genuine non-silent WAVE speech of the right duration
-   through the full shipped path, and a playable clip is committed at
-   `docs/evidence/rime-mistv3-luna-hello.wav`. Intelligibility and clause
-   pacing need a human ear — see
-   [docs/RIME_EVIDENCE.md](docs/RIME_EVIDENCE.md) §8.
+4. **`spell()` is not used — and that was measured, not assumed.** Rime
+   documents it as available on `mistv3`, so it was implemented, A/B rendered
+   against plain flight codes, and then removed: the extra duration did not
+   grow with code length, which it must if the construct is being processed.
+   Shipping it anyway risked the literal word "spell" being read aloud before
+   every flight code. Flight codes are read plainly instead. Clips, timings and
+   the reasoning are in [docs/RIME_EVIDENCE.md](docs/RIME_EVIDENCE.md) §4.3.
+5. **No formal listening review.** Audio has been played in a browser session
+   and the user-path timings are recorded in
+   [docs/RIME_EVIDENCE.md](docs/RIME_EVIDENCE.md) §6.8, but nobody has sat down
+   and assessed intelligibility, voice suitability and clause pacing as a
+   deliberate exercise. A playable clip is committed at
+   `docs/evidence/rime-mistv3-luna-hello.wav` so a reviewer can judge for
+   themselves.
+6. **The browser evidence is one setup.** §6.8 was recorded on a single machine,
+   microphone, network and speaker. Other browsers, devices, accents and network
+   conditions are untested.
 
 **Listening**
 
-6. **Voice activity detection is an energy threshold**, not production-grade
+7. **Voice activity detection is an energy threshold**, not production-grade
    VAD. It cannot tell speech from a door slam — which is exactly why tier 2
    confirmation exists before the generation advances.
-7. **Browser speech recognition is not guaranteed to run on-device.** Chrome
+8. **Browser speech recognition is not guaranteed to run on-device.** Chrome
    and Edge have historically used a remote Google service. This application
    never receives or uploads your audio, but no privacy claim about the
    *browser* is made. Firefox does not implement the API; the UI says so.
-8. **Echo.** With speakers at volume the agent can hear itself and interrupt
+9. **Echo.** With speakers at volume the agent can hear itself and interrupt
    its own reply. Echo cancellation is requested on the microphone; headphones
    are recommended for the demo.
-9. **Recognition quality is the browser’s.** Accents, noise and domain words
+10. **Recognition quality is the browser’s.** Accents, noise and domain words
    are outside this project’s control.
 
 **Application**
 
-10. **In-memory state only.** History, generations and events live in the
+11. **In-memory state only.** History, generations and events live in the
     server process and are lost on restart. There is no database and no
     horizontal scaling: generation state is per-process, so a second instance
     would not share it.
-11. **The default provider does not reason.** It is a deterministic stub that
+12. **The default provider does not reason.** It is a deterministic stub that
     handles the three travel intents and otherwise says plainly that it cannot
     help. Set `LLM_PROVIDER=anthropic` for real replies. The stub is the
     default because it makes the acceptance test reproducible at zero cost.
-12. **Tool selection is deterministic keyword matching**, not model-driven tool
+13. **Tool selection is deterministic keyword matching**, not model-driven tool
     calling. This keeps the whole tool demonstration free and offline, but it
     is not how a production agent would choose a tool.
-13. **The travel tools are mocks.** They return synthetic data derived from a
+14. **The travel tools are mocks.** They return synthetic data derived from a
     hash of the input — never real flight, hotel or weather information.
-14. **No token streaming.** A reply is committed whole, then spoken.
-15. **Interruption is bounded by recognition latency.** Tier 1 stops audio on
+15. **No token streaming.** A reply is committed whole, then spoken.
+16. **Interruption is bounded by recognition latency.** Tier 1 stops audio on
     loudness within milliseconds, but the generation only advances once words
     are recognised, or after the 1200 ms confirmation window expires.
 
@@ -654,6 +688,7 @@ npm run typecheck        # type-check every workspace
 npm run build            # production build of the web client
 npm run verify           # 8 correctness suites - offline, no key, no server
 npm run preflight:rime   # Rime config + secret hygiene checks
+npm run audio:qa         # waveform checks on real Rime output (needs a key)
 ```
 
 `npm run verify` covers generation fencing, conversation state, the event log,
